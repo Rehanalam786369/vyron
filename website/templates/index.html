@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VYRON Control Panel | Beyond Connections. Total Control.</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220%22%22><text y=%2222%22 font-size=%2222%22>🛡️</text></svg>">
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            cyber: {
+              950: '#060910',
+              900: '#0a0e1a',
+              850: '#0e1424',
+              800: '#141c30',
+              700: '#1e293b',
+              accent: '#38bdf8',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- Custom CSS -->
+  <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body class="bg-cyber-950 text-slate-100 min-h-screen antialiased flex flex-col selection:bg-cyan-500 selection:text-white">
+
+  <!-- ======================================================================== -->
+  <!-- TOP NAVBAR -->
+  <!-- ======================================================================== -->
+  <header class="sticky top-0 z-40 border-b border-slate-800/80 bg-cyber-900/90 backdrop-blur-md px-4 sm:px-6 py-3 transition-colors">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+      
+      <!-- Brand & Status -->
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 via-sky-400 to-indigo-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 ring-1 ring-cyan-400/30">
+          <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+          </svg>
+        </div>
+        <div>
+          <div class="flex items-center space-x-2">
+            <span class="text-2xl font-extrabold tracking-wider bg-gradient-to-r from-cyan-400 via-sky-200 to-indigo-400 bg-clip-text text-transparent">
+              VYRON
+            </span>
+            <span class="text-xs px-2 py-0.5 rounded-full bg-cyan-950/80 text-cyan-400 border border-cyan-800/60 font-mono font-semibold tracking-wide">
+              CONTROL PANEL
+            </span>
+          </div>
+          <p class="text-xs text-slate-400 tracking-wide hidden sm:block">Beyond Connections. Total Control.</p>
+        </div>
+
+        <!-- MySQL Live Health Pill -->
+        <div id="db-health-pill" class="flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-mono font-medium border transition-colors bg-slate-900 border-slate-700 text-slate-400 ml-2">
+          <span id="db-health-dot" class="w-2 h-2 rounded-full bg-slate-500 pulse-indicator"></span>
+          <span id="db-health-text">DB: CHECKING...</span>
+        </div>
+      </div>
+
+      <!-- Device & Mode Controls -->
+      <div class="flex items-center flex-wrap gap-2 sm:gap-3">
+        
+        <!-- Device Name Button -->
+        <button id="btn-edit-device" class="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-cyber-800 border border-slate-700 hover:border-cyan-500/50 text-xs font-medium text-slate-300 hover:text-white transition group" title="Click to rename device">
+          <svg class="w-3.5 h-3.5 text-slate-400 group-hover:text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+          </svg>
+          <span id="nav-device-name" class="font-mono truncate max-w-[130px] sm:max-w-[180px]">Android Device</span>
+          <svg class="w-3 h-3 text-slate-500 group-hover:text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/>
+          </svg>
+        </button>
+
+        <!-- Guided Mode Status Badge -->
+        <div id="guided-mode-badge" class="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all bg-slate-800/80 text-slate-400 border-slate-700">
+          <svg id="guided-mode-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"/>
+          </svg>
+          <span id="guided-mode-text">GUIDED MODE: OFF</span>
+        </div>
+
+        <!-- Lock Toggle Button -->
+        <button id="btn-toggle-lock" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-cyan-600 hover:bg-cyan-500 text-white shadow-sm shadow-cyan-600/30 transition flex items-center space-x-1">
+          <span id="lock-btn-text">Toggle Handover Lock</span>
+        </button>
+
+        <!-- Change PIN Button -->
+        <button id="btn-open-pin-modal" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-cyber-800 hover:bg-cyber-700 border border-slate-700 text-slate-300 hover:text-white transition">
+          Change PIN
+        </button>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- ======================================================================== -->
+  <!-- MAIN CONTAINER -->
+  <!-- ======================================================================== -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-6">
+
+    <!-- ====================================================================== -->
+    <!-- ROW 1: KPI TELEMETRY METRIC CARDS -->
+    <!-- ====================================================================== -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      
+      <!-- Card 1: Network Activity -->
+      <div class="cyber-card p-4 rounded-xl relative overflow-hidden">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Network Activity</span>
+          <div class="w-8 h-8 rounded-lg bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+            </svg>
+          </div>
+        </div>
+        <div class="mt-3 flex items-baseline justify-between">
+          <div class="text-3xl font-extrabold font-mono text-white" id="stat-total-logs">0</div>
+          <span class="text-xs text-sky-400 font-medium">Logged Packets</span>
+        </div>
+        <div class="mt-2 text-xs text-slate-400 flex items-center justify-between">
+          <span>Allowed Traffic:</span>
+          <span id="stat-allowed-logs" class="font-mono font-medium text-emerald-400">0</span>
+        </div>
+      </div>
+
+      <!-- Card 2: Blocked Connections -->
+      <div class="cyber-card p-4 rounded-xl relative overflow-hidden">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Blocked Requests</span>
+          <div class="w-8 h-8 rounded-lg bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/>
+            </svg>
+          </div>
+        </div>
+        <div class="mt-3 flex items-baseline justify-between">
+          <div class="text-3xl font-extrabold font-mono text-rose-400" id="stat-blocked-logs">0</div>
+          <span class="text-xs px-2 py-0.5 rounded-full bg-rose-950/80 text-rose-400 border border-rose-800/60 font-mono font-semibold" id="stat-block-rate">
+            0% Rate
+          </span>
+        </div>
+        <div class="mt-2 text-xs text-slate-400 flex items-center justify-between">
+          <span>Enforcement:</span>
+          <span class="text-slate-300 font-medium">Zero-Leakage Kernel</span>
+        </div>
+      </div>
+
+      <!-- Card 3: Active Rules -->
+      <div class="cyber-card p-4 rounded-xl relative overflow-hidden">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Active Rules</span>
+          <div class="w-8 h-8 rounded-lg bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+            </svg>
+          </div>
+        </div>
+        <div class="mt-3 flex items-baseline justify-between">
+          <div class="text-3xl font-extrabold font-mono text-white">
+            <span id="stat-active-rules">0</span>
+            <span class="text-base font-normal text-slate-500">/<span id="stat-total-rules">0</span></span>
+          </div>
+          <span class="text-xs text-purple-400 font-medium font-mono" id="stat-rules-types-sub">
+            0D · 0IP · 0A
+          </span>
+        </div>
+        <div class="mt-2 text-xs text-slate-400 flex items-center justify-between">
+          <span>Priority Policy:</span>
+          <span class="text-slate-300 font-medium">Specificity > Allow > Block</span>
+        </div>
+      </div>
+
+      <!-- Card 4: Handover Status -->
+      <div class="cyber-card p-4 rounded-xl relative overflow-hidden">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-semibold uppercase tracking-wider text-slate-400">Handover Status</span>
+          <div class="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400" id="handover-status-icon">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+          </div>
+        </div>
+        <div class="mt-3 flex items-baseline justify-between">
+          <div class="text-2xl font-bold font-mono tracking-tight" id="handover-status-title">Standby</div>
+          <span class="text-xs px-2 py-0.5 rounded-full font-mono font-medium" id="handover-pill">
+            UNLOCKED
+          </span>
+        </div>
+        <div class="mt-2 text-xs text-slate-400 flex items-center justify-between truncate">
+          <span>Bound Device:</span>
+          <span id="stat-device-name" class="text-cyan-400 font-mono font-medium truncate max-w-[140px]">Android Device</span>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ====================================================================== -->
+    <!-- ROW 2: ANALYTICS CHARTS (FIXED HEIGHT CONTAINER) -->
+    <!-- ====================================================================== -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      
+      <!-- Chart 1: Traffic Verdict -->
+      <div class="cyber-card p-5 rounded-xl">
+        <div class="flex items-center justify-between mb-3">
+          <div>
+            <h3 class="text-sm font-bold text-white tracking-wide">Traffic Verdict</h3>
+            <p class="text-xs text-slate-400">Real-time ratio of Allowed vs. Blocked packets</p>
+          </div>
+          <span class="text-xs font-mono text-cyan-400 bg-cyan-950/60 border border-cyan-800/40 px-2 py-0.5 rounded">
+            LIVE TELEMETRY
+          </span>
+        </div>
+        <div class="w-full relative h-56 flex items-center justify-center">
+          <canvas id="trafficVerdictChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Chart 2: Active Rules Breakdown -->
+      <div class="cyber-card p-5 rounded-xl">
+        <div class="flex items-center justify-between mb-3">
+          <div>
+            <h3 class="text-sm font-bold text-white tracking-wide">Active Rules Breakdown</h3>
+            <p class="text-xs text-slate-400">Enforcement distribution across DNS, IP & Android Apps</p>
+          </div>
+          <span class="text-xs font-mono text-purple-400 bg-purple-950/60 border border-purple-800/40 px-2 py-0.5 rounded">
+            POLICY ENGINE
+          </span>
+        </div>
+        <div class="w-full relative h-56 flex items-center justify-center">
+          <canvas id="rulesBreakdownChart"></canvas>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ====================================================================== -->
+    <!-- ROW 3: MAIN CONTROL WORKSPACE (2-COLUMN GRID) -->
+    <!-- ====================================================================== -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      
+      <!-- ==================================================================== -->
+      <!-- LEFT COLUMN: UNIFIED DNS, IP & APP RULE MANAGER (7 COLUMNS) -->
+      <!-- ==================================================================== -->
+      <div class="lg:col-span-7 space-y-5">
+        
+        <!-- Add Rule Card -->
+        <div class="cyber-card p-5 rounded-xl border-cyan-500/20">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
+            <div class="flex items-center space-x-2">
+              <div class="w-2.5 h-2.5 rounded-full bg-cyan-400"></div>
+              <h2 class="text-sm font-bold tracking-wide text-white">Deploy Network Policy</h2>
+            </div>
+            <span class="text-xs text-slate-400 font-mono">Kernel Sync: Active</span>
+          </div>
+
+          <form id="form-add-rule" class="space-y-4">
+            
+            <!-- Type & Action Selectors -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-semibold text-slate-400 mb-1">RULE TYPE</label>
+                <select id="rule-type-select" class="w-full bg-cyber-850 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500 font-mono">
+                  <option value="domain">DNS Domain</option>
+                  <option value="ip">IP Address</option>
+                  <option value="app">Android App Package</option>
+                </select>
+              </div>
+
+              <div>
+                <label class="block text-xs font-semibold text-slate-400 mb-1">POLICY ACTION</label>
+                <select id="rule-action-select" class="w-full bg-cyber-850 border border-slate-700 rounded-lg px-3 py-2 text-xs font-bold text-rose-400 focus:outline-none focus:border-cyan-500">
+                  <option value="BLOCK" class="text-rose-400">BLOCK (Restricted)</option>
+                  <option value="ALLOW" class="text-emerald-400">ALLOW (Whitelist Override)</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Target Input -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-400 mb-1">TARGET IDENTIFIER</label>
+              <input 
+                type="text" 
+                id="rule-target-input" 
+                placeholder="e.g. instagram.com or reels.instagram.com" 
+                class="w-full bg-cyber-850 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 font-mono focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
+                required
+              >
+              <p class="text-[11px] text-slate-500 mt-1" id="rule-target-hint">
+                Domains match exact & subdomains. URLs like <code class="text-cyan-400">https://m.instagram.com/reels</code> are automatically normalized.
+              </p>
+            </div>
+
+            <!-- Optional Note -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-400 mb-1">NOTE / RATIONALE (OPTIONAL)</label>
+              <input 
+                type="text" 
+                id="rule-note-input" 
+                placeholder="e.g. Study hour lock, Distraction control" 
+                class="w-full bg-cyber-850 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+              >
+            </div>
+
+            <!-- Time Limit / Expiry Presets -->
+            <div>
+              <div class="flex items-center justify-between mb-1.5">
+                <label class="text-xs font-semibold text-slate-400">DURATION LIMIT</label>
+                <span class="text-[11px] text-cyan-400 font-mono" id="duration-display">Permanent Policy</span>
+              </div>
+              <div class="flex flex-wrap items-center gap-2">
+                <button type="button" class="preset-chip active px-2.5 py-1 text-xs font-mono rounded bg-cyan-600 text-white border border-cyan-500" data-mins="">
+                  Permanent
+                </button>
+                <button type="button" class="preset-chip px-2.5 py-1 text-xs font-mono rounded bg-cyber-850 text-slate-300 border border-slate-700 hover:border-slate-500" data-mins="1">
+                  1 min (Demo)
+                </button>
+                <button type="button" class="preset-chip px-2.5 py-1 text-xs font-mono rounded bg-cyber-850 text-slate-300 border border-slate-700 hover:border-slate-500" data-mins="15">
+                  15 min
+                </button>
+                <button type="button" class="preset-chip px-2.5 py-1 text-xs font-mono rounded bg-cyber-850 text-slate-300 border border-slate-700 hover:border-slate-500" data-mins="60">
+                  60 min
+                </button>
+                <div class="flex items-center ml-auto">
+                  <input 
+                    type="number" 
+                    id="rule-duration-custom" 
+                    placeholder="Custom mins" 
+                    min="1" 
+                    class="w-28 bg-cyber-850 border border-slate-700 rounded px-2 py-1 text-xs text-white placeholder-slate-500 font-mono focus:outline-none focus:border-cyan-500"
+                  >
+                </div>
+              </div>
+            </div>
+
+            <!-- Submit Button -->
+            <button 
+              type="submit" 
+              id="btn-deploy-rule"
+              class="w-full py-2.5 rounded-lg bg-gradient-to-r from-cyan-600 to-sky-600 hover:from-cyan-500 hover:to-sky-500 text-white text-xs font-bold tracking-wider uppercase shadow-md shadow-cyan-600/30 transition flex items-center justify-center space-x-2"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+              </svg>
+              <span>Deploy Policy Rule</span>
+            </button>
+          </form>
+        </div>
+
+        <!-- Filter Tabs & Rules Table -->
+        <div class="cyber-card p-5 rounded-xl">
+          
+          <!-- Filter Tabs & Search -->
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+            
+            <!-- Tabs -->
+            <div class="flex items-center space-x-1 border-b sm:border-b-0 border-slate-800 pb-2 sm:pb-0 overflow-x-auto">
+              <button class="rule-tab active px-3 py-1.5 text-xs font-semibold rounded-lg bg-cyber-800 text-white border border-cyan-500/50" data-tab="all">
+                All (<span id="tab-count-all">0</span>)
+              </button>
+              <button class="rule-tab px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-white hover:bg-cyber-800 border border-transparent" data-tab="domain">
+                DNS (<span id="tab-count-domain">0</span>)
+              </button>
+              <button class="rule-tab px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-white hover:bg-cyber-800 border border-transparent" data-tab="ip">
+                IP (<span id="tab-count-ip">0</span>)
+              </button>
+              <button class="rule-tab px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-white hover:bg-cyber-800 border border-transparent" data-tab="app">
+                Apps (<span id="tab-count-app">0</span>)
+              </button>
+              <button class="rule-tab px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-white hover:bg-cyber-800 border border-transparent" data-tab="timed">
+                Timed (<span id="tab-count-timed">0</span>)
+              </button>
+            </div>
+
+            <!-- Search input -->
+            <div class="relative min-w-[180px]">
+              <input 
+                type="text" 
+                id="search-rules-input" 
+                placeholder="Search rules..." 
+                class="w-full bg-cyber-850 border border-slate-700 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 font-mono"
+              >
+              <svg class="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+              </svg>
+            </div>
+          </div>
+
+          <!-- Rules List Container -->
+          <div class="overflow-y-auto max-h-[460px] space-y-2 pr-1" id="rules-list-container">
+            <div class="py-12 text-center text-slate-500 text-xs font-mono">
+              Loading active network policies...
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- ==================================================================== -->
+      <!-- RIGHT COLUMN: LIVE MONITOR & JUDGE SIMULATOR (5 COLUMNS) -->
+      <!-- ==================================================================== -->
+      <div class="lg:col-span-5 space-y-5">
+        
+        <!-- Live Traffic Simulator Box -->
+        <div class="cyber-card p-5 rounded-xl border-purple-500/20 relative">
+          
+          <!-- Flashing Blocked Alert Banner (Prominent Header) -->
+          <div id="blocked-alert-banner" class="hidden mb-4 p-3 rounded-xl border border-rose-500 text-center animate-alert-flash text-white font-extrabold text-sm tracking-wider uppercase flex items-center justify-center space-x-2">
+            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+            </svg>
+            <span>BLOCKED CONNECTION DETECTED</span>
+          </div>
+
+          <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
+            <div>
+              <h2 class="text-sm font-bold tracking-wide text-white">Test Live Rule Engine</h2>
+              <p class="text-xs text-slate-400">Interactive Hackathon Simulator</p>
+            </div>
+            <span class="text-xs font-mono text-purple-400 bg-purple-950/60 border border-purple-800/40 px-2 py-0.5 rounded">
+              SIMULATOR
+            </span>
+          </div>
+
+          <form id="form-simulate" class="space-y-3">
+            <div class="grid grid-cols-3 gap-2">
+              <div class="col-span-1">
+                <select id="sim-type-select" class="w-full bg-cyber-850 border border-slate-700 rounded-lg px-2.5 py-2 text-xs text-white focus:outline-none focus:border-purple-500 font-mono">
+                  <option value="domain">DNS</option>
+                  <option value="ip">IP</option>
+                  <option value="app">App</option>
+                </select>
+              </div>
+              <div class="col-span-2">
+                <input 
+                  type="text" 
+                  id="sim-target-input" 
+                  placeholder="e.g. reels.instagram.com" 
+                  class="w-full bg-cyber-850 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 font-mono focus:outline-none focus:border-purple-500"
+                  required
+                >
+              </div>
+            </div>
+
+            <!-- Quick Presets -->
+            <div>
+              <span class="text-[11px] font-semibold text-slate-400 block mb-1">QUICK TEST PRESETS:</span>
+              <div class="flex flex-wrap gap-1.5">
+                <button type="button" class="sim-chip text-[11px] font-mono px-2 py-0.5 rounded bg-cyber-850 hover:bg-cyber-800 text-slate-300 border border-slate-700" data-type="domain" data-val="reels.instagram.com">
+                  reels.instagram.com
+                </button>
+                <button type="button" class="sim-chip text-[11px] font-mono px-2 py-0.5 rounded bg-cyber-850 hover:bg-cyber-800 text-slate-300 border border-slate-700" data-type="domain" data-val="wikipedia.org">
+                  wikipedia.org
+                </button>
+                <button type="button" class="sim-chip text-[11px] font-mono px-2 py-0.5 rounded bg-cyber-850 hover:bg-cyber-800 text-slate-300 border border-slate-700" data-type="ip" data-val="157.240.22.174">
+                  157.240.22.174
+                </button>
+                <button type="button" class="sim-chip text-[11px] font-mono px-2 py-0.5 rounded bg-cyber-850 hover:bg-cyber-800 text-slate-300 border border-slate-700" data-type="app" data-val="com.dts.freefireth">
+                  FreeFire (App)
+                </button>
+              </div>
+            </div>
+
+            <!-- Test Connection Button -->
+            <button 
+              type="submit" 
+              id="btn-simulate-test"
+              class="w-full py-2 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold tracking-wider uppercase shadow-md shadow-purple-600/30 transition flex items-center justify-center space-x-1.5"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/>
+              </svg>
+              <span>Test Connection Request</span>
+            </button>
+          </form>
+
+          <!-- Verdict Feedback Banner -->
+          <div id="sim-verdict-card" class="mt-4 hidden p-3 rounded-lg border transition-all">
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-xs font-bold font-mono tracking-wide" id="sim-verdict-status">VERDICT</span>
+              <span class="text-[10px] font-mono text-slate-400" id="sim-verdict-time">JUST NOW</span>
+            </div>
+            <div class="text-xs font-mono text-white break-all" id="sim-verdict-target">target.com</div>
+            <div class="text-[11px] text-slate-300 mt-1" id="sim-verdict-reason">Reason description</div>
+          </div>
+
+        </div>
+
+        <!-- Activity & Block Logs Section -->
+        <div class="cyber-card p-5 rounded-xl">
+          
+          <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
+            <div>
+              <h2 class="text-sm font-bold tracking-wide text-white">Live Network Monitor</h2>
+              <p class="text-xs text-slate-400">Chronological telemetry feed</p>
+            </div>
+            <button id="btn-clear-logs" class="text-xs font-medium text-slate-400 hover:text-rose-400 px-2 py-1 rounded bg-cyber-850 hover:bg-rose-950/40 border border-slate-700 hover:border-rose-800/60 transition">
+              Clear Logs
+            </button>
+          </div>
+
+          <!-- Log Filters -->
+          <div class="flex items-center justify-between gap-2 mb-3">
+            <div class="flex items-center space-x-1">
+              <button class="log-filter-btn active px-2.5 py-1 text-xs font-mono rounded bg-cyber-800 text-white border border-slate-600" data-status="ALL">
+                All
+              </button>
+              <button class="log-filter-btn px-2.5 py-1 text-xs font-mono rounded text-slate-400 hover:text-rose-400 border border-transparent" data-status="BLOCKED">
+                Blocked
+              </button>
+              <button class="log-filter-btn px-2.5 py-1 text-xs font-mono rounded text-slate-400 hover:text-emerald-400 border border-transparent" data-status="ALLOWED">
+                Allowed
+              </button>
+            </div>
+
+            <!-- Search Logs -->
+            <div class="relative w-36 sm:w-44">
+              <input 
+                type="text" 
+                id="search-logs-input" 
+                placeholder="Filter logs..." 
+                class="w-full bg-cyber-850 border border-slate-700 rounded px-2.5 py-1 text-xs text-white placeholder-slate-500 font-mono focus:outline-none focus:border-cyan-500"
+              >
+            </div>
+          </div>
+
+          <!-- Logs Feed Container -->
+          <div class="overflow-y-auto max-h-[380px] space-y-2 pr-1 font-mono text-xs" id="logs-container">
+            <div class="py-12 text-center text-slate-500 text-xs">
+              Waiting for live telemetry...
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- ======================================================================== -->
+  <!-- FOOTER -->
+  <!-- ======================================================================== -->
+  <footer class="border-t border-slate-800/60 bg-cyber-900/60 text-slate-500 text-xs py-4 px-6 text-center font-mono">
+    <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+      <div>
+        <span class="text-slate-300 font-semibold">VYRON</span> · Beyond Connections. Total Control.
+      </div>
+      <div>
+        Hardware & System-Level Network Firewall Engine · Powered by MySQL 8 (Pure Python)
+      </div>
+    </div>
+  </footer>
+
+  <!-- ======================================================================== -->
+  <!-- MODAL 1: SUPERVISOR PIN MODAL -->
+  <!-- ======================================================================== -->
+  <div id="modal-pin" class="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop hidden">
+    <div class="cyber-card w-full max-w-sm rounded-2xl p-6 border-cyan-500/30 shadow-2xl space-y-4">
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+          </svg>
+        </div>
+        <div>
+          <h3 class="text-base font-bold text-white" id="modal-pin-title">Supervisor Authentication</h3>
+          <p class="text-xs text-slate-400" id="modal-pin-desc">Enter Supervisor PIN to continue</p>
+        </div>
+      </div>
+
+      <div class="space-y-2">
+        <label class="block text-xs font-semibold text-slate-400">SUPERVISOR PIN</label>
+        <input 
+          type="password" 
+          id="input-supervisor-pin" 
+          maxlength="8" 
+          placeholder="••••" 
+          class="w-full bg-cyber-850 border border-slate-700 rounded-lg px-3 py-2 text-center text-xl tracking-widest text-white font-mono focus:outline-none focus:border-cyan-500"
+          autocomplete="off"
+        >
+        <p class="text-[11px] text-slate-500 text-center font-mono">Default hackathon PIN: <span class="text-cyan-400">1234</span></p>
+        <p id="pin-error-msg" class="text-xs text-rose-400 font-medium text-center hidden"></p>
+      </div>
+
+      <div class="flex items-center space-x-2 pt-2">
+        <button type="button" id="btn-cancel-pin-modal" class="flex-1 py-2 rounded-lg bg-cyber-800 hover:bg-cyber-700 text-slate-300 text-xs font-semibold transition">
+          Cancel
+        </button>
+        <button type="button" id="btn-confirm-pin" class="flex-1 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition shadow-md shadow-cyan-600/30">
+          Confirm
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================================== -->
+  <!-- MODAL 2: CHANGE PIN MODAL -->
+  <!-- ======================================================================== -->
+  <div id="modal-change-pin" class="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop hidden">
+    <div class="cyber-card w-full max-w-sm rounded-2xl p-6 border-slate-700 shadow-2xl space-y-4">
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/>
+          </svg>
+        </div>
+        <div>
+          <h3 class="text-base font-bold text-white">Update Supervisor PIN</h3>
+          <p class="text-xs text-slate-400">Secure PIN for Intentional Handover</p>
+        </div>
+      </div>
+
+      <form id="form-change-pin" class="space-y-3">
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 mb-1">CURRENT PIN</label>
+          <input 
+            type="password" 
+            id="input-current-pin" 
+            maxlength="8" 
+            placeholder="Current PIN" 
+            class="w-full bg-cyber-850 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-purple-500"
+            required
+          >
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 mb-1">NEW PIN (4-8 DIGITS)</label>
+          <input 
+            type="password" 
+            id="input-new-pin" 
+            maxlength="8" 
+            placeholder="New 4-8 digit PIN" 
+            class="w-full bg-cyber-850 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-purple-500"
+            required
+          >
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 mb-1">CONFIRM NEW PIN</label>
+          <input 
+            type="password" 
+            id="input-confirm-new-pin" 
+            maxlength="8" 
+            placeholder="Confirm New PIN" 
+            class="w-full bg-cyber-850 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-purple-500"
+            required
+          >
+        </div>
+
+        <p id="change-pin-error" class="text-xs text-rose-400 font-medium hidden"></p>
+
+        <div class="flex items-center space-x-2 pt-2">
+          <button type="button" id="btn-cancel-change-pin" class="flex-1 py-2 rounded-lg bg-cyber-800 hover:bg-cyber-700 text-slate-300 text-xs font-semibold transition">
+            Cancel
+          </button>
+          <button type="submit" class="flex-1 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition shadow-md shadow-purple-600/30">
+            Save PIN
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ======================================================================== -->
+  <!-- MODAL 3: EDIT DEVICE NAME MODAL -->
+  <!-- ======================================================================== -->
+  <div id="modal-device" class="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop hidden">
+    <div class="cyber-card w-full max-w-sm rounded-2xl p-6 border-slate-700 shadow-2xl space-y-4">
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+          </svg>
+        </div>
+        <div>
+          <h3 class="text-base font-bold text-white">Target Device Profile</h3>
+          <p class="text-xs text-slate-400">Rename the bound Android system</p>
+        </div>
+      </div>
+
+      <form id="form-edit-device" class="space-y-3">
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 mb-1">DEVICE NAME</label>
+          <input 
+            type="text" 
+            id="input-device-name" 
+            maxlength="100" 
+            placeholder="e.g. Student Pixel 8 or Handover Galaxy S23" 
+            class="w-full bg-cyber-850 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-cyan-500"
+            required
+          >
+        </div>
+
+        <div class="flex items-center space-x-2 pt-2">
+          <button type="button" id="btn-cancel-device-modal" class="flex-1 py-2 rounded-lg bg-cyber-800 hover:bg-cyber-700 text-slate-300 text-xs font-semibold transition">
+            Cancel
+          </button>
+          <button type="submit" class="flex-1 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition shadow-md shadow-cyan-600/30">
+            Save Device
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ======================================================================== -->
+  <!-- TOAST NOTIFICATIONS STACK (BOTTOM-RIGHT) -->
+  <!-- ======================================================================== -->
+  <div id="toast-stack" class="fixed bottom-5 right-5 z-50 flex flex-col space-y-2 pointer-events-none max-w-sm w-full"></div>
+
+  <!-- Dashboard JavaScript -->
+  <script src="/static/js/dashboard.js"></script>
+</body>
+</html>
