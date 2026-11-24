@@ -73,6 +73,7 @@ class MainActivity : FlutterActivity() {
                 "getPermissionStatus" -> {
                     val status = mapOf(
                         "vpnConsent" to (VpnService.prepare(this) == null),
+                        "isProtectionRunning" to VyronVpnService.isServiceRunning,
                         "usageAccess" to hasUsageStatsPermission(),
                         "overlay" to (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Settings.canDrawOverlays(this) else true),
                         "accessibility" to isAccessibilityServiceEnabled(),
@@ -132,6 +133,26 @@ class MainActivity : FlutterActivity() {
                             runOnUiThread {
                                 result.success(listOf("BLOCKED (Unresolved / ${e.message})"))
                             }
+                        }
+                    }
+                }
+
+                "openWifiSettings" -> {
+                    try {
+                        val intent = Intent(Settings.ACTION_WIFI_SETTINGS).apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                        startActivity(intent)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        try {
+                            val intent = Intent(Settings.ACTION_WIRELESS_SETTINGS).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e2: Exception) {
+                            result.error("SETTINGS_ERROR", e2.message, null)
                         }
                     }
                 }

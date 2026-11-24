@@ -8,7 +8,7 @@ class ApiService {
   static const String keyDeviceId = 'vyron_device_id';
   static const String keyDeviceName = 'vyron_device_name';
 
-  static String defaultServerUrl = 'http://10.0.2.2:5000';
+  static String defaultServerUrl = 'https://vyron-sbkd.onrender.com';
 
   // Load configured server URL
   static Future<String> getServerUrl() async {

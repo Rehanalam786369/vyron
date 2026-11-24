@@ -824,6 +824,29 @@ function copyPairingKey() {
   }
 }
 
+function copyPrivateDns() {
+  const host = document.getElementById('dns-hostname-display')?.textContent?.trim() || '127.0.0.1';
+  navigator.clipboard.writeText(host).then(() => {
+    showToast(`Wi-Fi DNS IP (${host}) copied to clipboard! Paste into DNS 1.`, 'success');
+  }).catch(() => {
+    showToast(`Wi-Fi DNS IP: ${host}`, 'info');
+  });
+}
+
+async function fetchDnsInfo() {
+  try {
+    const res = await fetch('/api/dns/info');
+    if (res.ok) {
+      const data = await res.json();
+      const el = document.getElementById('dns-hostname-display');
+      if (el) {
+        el.textContent = data.wifi_dns_ip || data.server_ip || '127.0.0.1';
+        el.title = `Server IP: ${data.server_ip} | Port 53 UDP / Port 853 DoT`;
+      }
+    }
+  } catch (_) {}
+}
+
 async function regenerateDeviceKey() {
   if (!confirm('Regenerating this key will disconnect any previously paired phone until the new key is entered. Continue?')) {
     return;
@@ -1347,6 +1370,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Initial Sync
   await checkDatabaseHealth();
   await fetchDevicesList();
+  await fetchDnsInfo();
   await fetchDeviceData();
 
   // Periodic Overlap-Safe Polling (every 3 seconds)

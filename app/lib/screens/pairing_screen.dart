@@ -11,7 +11,7 @@ class PairingScreen extends StatefulWidget {
 }
 
 class _PairingScreenState extends State<PairingScreen> {
-  final _serverUrlController = TextEditingController(text: 'http://10.0.2.2:5000');
+  final _serverUrlController = TextEditingController(text: 'https://vyron-sbkd.onrender.com');
   final _keyController = TextEditingController(text: 'VYR-');
   bool _isLoading = false;
   String? _statusText;

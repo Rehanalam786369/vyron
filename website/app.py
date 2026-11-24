@@ -7,7 +7,7 @@ import secrets
 import sys
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, jsonify, redirect, render_template, request, session, url_for, Response
 import mysql.connector
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -20,6 +20,7 @@ if str(BASE_DIR.parent) not in sys.path:
 
 try:
     from db import get_db_connection, init_db, format_db_error
+    from dns_server import get_local_ip, VyronDnsServer
     from policy_engine import (
         evaluate_app_policy,
         evaluate_network_request,
@@ -27,6 +28,7 @@ try:
     )
 except ImportError:
     from website.db import get_db_connection, init_db, format_db_error
+    from website.dns_server import get_local_ip, VyronDnsServer
     from website.policy_engine import (
         evaluate_app_policy,
         evaluate_network_request,
@@ -46,15 +48,22 @@ class VyronJSONProvider(DefaultJSONProvider):
             return o.isoformat()
         return super().default(o)
 
+from werkzeug.middleware.proxy_fix import ProxyFix
+
 app = Flask(
     __name__,
     template_folder=str(BASE_DIR / "templates"),
     static_folder=str(BASE_DIR / "static"),
 )
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 app.json = VyronJSONProvider(app)
 app.config["SECRET_KEY"] = os.getenv("FLASK_SECRET_KEY", "vyron-dev-secret-key-change-me")
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+
+# Auto-secure session cookies on Render / HTTPS
+if os.getenv("RENDER") or os.getenv("RENDER_EXTERNAL_URL") or os.getenv("SESSION_COOKIE_SECURE", "false").lower() in ("true", "1", "yes"):
+    app.config["SESSION_COOKIE_SECURE"] = True
 
 logger = logging.getLogger("vyron.app")
 if not logger.handlers:
@@ -192,6 +201,11 @@ def health_check():
 
 @app.route("/api/auth/register", methods=["POST"])
 def auth_register():
+    # Check if registration is open or disabled via environment variable
+    registration_enabled = os.getenv("REGISTRATION_ENABLED", "true").lower() in ("true", "1", "yes")
+    if not registration_enabled:
+        return jsonify({"error": "Public registration is disabled on this server. Contact your supervisor."}), 403
+
     data = request.get_json(silent=True) or {}
     full_name = data.get("full_name", "").strip()
     email = data.get("email", "").strip().lower()
@@ -314,6 +328,60 @@ def auth_me():
         "email": session["email"],
         "full_name": session["full_name"],
     }), 200
+
+
+@app.route("/api/dns/info", methods=["GET"])
+def dns_info():
+    """Provides DNS configuration details for the supervisor and Android device."""
+    server_ip = get_local_ip()
+    port = int(os.getenv("PORT", 5000))
+    return jsonify({
+        "server_ip": server_ip,
+        "wifi_dns_ip": server_ip,
+        "private_dns_hostname": "vyron.dns",
+        "dot_port": 853,
+        "udp_dns_port": 53,
+        "doh_url": f"http://{server_ip}:{port}/dns-query",
+        "instructions": {
+            "android_wifi_dns": f"Settings -> Wi-Fi -> [Network] -> Advanced -> Static IP -> DNS 1: {server_ip}",
+            "android_private_dns": "Requires registered public domain with CA-signed TLS. For local zero-icon blocking, use Wi-Fi DNS 1 above or In-App Shield.",
+            "browser_secure_dns": f"Chrome Settings -> Privacy -> Use Secure DNS -> Custom: http://{server_ip}:{port}/dns-query"
+        }
+    }), 200
+
+
+@app.route("/dns-query", methods=["GET", "POST"])
+def dns_query_doh():
+    """RFC 8484 DNS-over-HTTPS (DoH) endpoint."""
+    raw_query = None
+    if request.method == "POST":
+        raw_query = request.get_data()
+    elif request.method == "GET":
+        dns_b64 = request.args.get("dns", "")
+        if dns_b64:
+            import base64
+            dns_b64 += "=" * ((4 - len(dns_b64) % 4) % 4)
+            try:
+                raw_query = base64.urlsafe_b64decode(dns_b64)
+            except Exception:
+                pass
+
+    if not raw_query or len(raw_query) < 12:
+        return "Bad Request", 400
+
+    dns_srv = VyronDnsServer()
+    query = dns_srv.parse_dns_query(raw_query)
+    if query:
+        if dns_srv.is_blocked(query["domain"]):
+            resp = dns_srv.craft_blocked_response(query, raw_query)
+            dns_srv._log_block_event(query["domain"], request.remote_addr, "DoH")
+            return Response(resp, mimetype="application/dns-message")
+        else:
+            resp = dns_srv._forward_upstream(raw_query)
+            if resp:
+                return Response(resp, mimetype="application/dns-message")
+
+    return "DNS Error", 500
 
 
 # ============================================================================

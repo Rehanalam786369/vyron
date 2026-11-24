@@ -132,6 +132,26 @@
               <button type="button" class="btn btn-cyan btn-sm" onclick="copyPairingKey()">Copy Key</button>
             </div>
           </div>
+
+          <!-- STEALTH DNS CONFIGURATION (ZERO-VPN MODE) -->
+          <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 8px; padding: 0.65rem 0.85rem; margin-bottom: 0.75rem;">
+            <div class="flex items-center justify-between mb-1">
+              <span style="font-size: 0.7rem; font-weight: 700; color: #38bdf8; letter-spacing: 0.05em;">
+                🛡️ WI-FI DNS SHIELD (ZERO VPN ICON)
+              </span>
+              <span class="pill pill-green" style="font-size: 0.65rem;">NO VPN ICON</span>
+            </div>
+            <div style="font-size: 0.72rem; color: var(--text-dim); margin-bottom: 0.4rem;">
+              Set in Android <strong>Wi-Fi → [Network] → Advanced → Static IP → DNS 1</strong>:
+            </div>
+            <div class="flex items-center gap-2">
+              <span id="dns-hostname-display" class="key-box" style="font-size: 0.82rem; padding: 0.25rem 0.5rem; color: #38bdf8;">10.101.172.157</span>
+              <button type="button" class="btn btn-cyan btn-sm" onclick="copyPrivateDns()">Copy DNS IP</button>
+            </div>
+            <div style="font-size: 0.68rem; color: #64748b; margin-top: 0.35rem; line-height: 1.3;">
+              💡 <em>Android Private DNS rejects local hostnames. Setting Wi-Fi DNS 1 above blocks restricted sites with zero status bar icons!</em>
+            </div>
+          </div>
         </div>
 
         <div class="flex items-center justify-between pt-2" style="border-top: 1px solid rgba(51, 65, 85, 0.4); font-size: 0.72rem; color: var(--text-dim); font-family: var(--font-mono);">

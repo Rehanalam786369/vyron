@@ -30,6 +30,11 @@ import kotlin.concurrent.thread
 
 class VyronVpnService : VpnService() {
 
+    companion object {
+        @Volatile
+        var isServiceRunning: Boolean = false
+    }
+
     private lateinit var policyStore: PolicyStore
     private var vpnInterface: ParcelFileDescriptor? = null
     private var isRunning = false
@@ -180,8 +185,10 @@ class VyronVpnService : VpnService() {
 
         try {
             vpnInterface = builder.establish()
+            isServiceRunning = true
         } catch (e: Exception) {
             e.printStackTrace()
+            isServiceRunning = false
             stopVpn()
             return
         }
@@ -518,6 +525,7 @@ class VyronVpnService : VpnService() {
 
     private fun stopVpn() {
         isRunning = false
+        isServiceRunning = false
         try {
             unregisterReceiver(policyUpdateReceiver)
         } catch (e: Exception) {

@@ -121,4 +121,11 @@ class NativeBridge {
       await _channel.invokeMethod('openPrivateDnsSettings');
     } catch (_) {}
   }
+
+  // Open device Wi-Fi settings for Static DNS configuration
+  static Future<void> openWifiSettings() async {
+    try {
+      await _channel.invokeMethod('openWifiSettings');
+    } catch (_) {}
+  }
 }
