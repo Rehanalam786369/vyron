@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VYRON Control Panel | Beyond Connections. Total Control.</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22><text y=%2220%22 font-size=%2220%22>🛡️</text></svg>">
+  <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+
+  <!-- ======================================================================== -->
+  <!-- TOP COMMAND BAR -->
+  <!-- ======================================================================== -->
+  <header class="navbar">
+    <div class="container flex items-center justify-between flex-wrap gap-3">
+      
+      <!-- Brand & DB Pill -->
+      <div class="flex items-center gap-3">
+        <div class="logo-badge">V</div>
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="logo-title">VYRON</span>
+            <span class="pill pill-cyan">TOTAL CONTROL</span>
+          </div>
+          <div style="font-size: 0.72rem; color: var(--text-dim); font-family: var(--font-mono);">
+            Beyond Connections. Total Control.
+          </div>
+        </div>
+
+        <div id="db-health-pill" class="pill pill-slate" style="margin-left: 0.5rem;">
+          <span id="db-health-dot" class="pulse-dot" style="background-color: var(--text-dim);"></span>
+          <span id="db-health-text">DB: CHECKING...</span>
+        </div>
+      </div>
+
+      <!-- Device Switcher & System Locks -->
+      <div class="flex items-center flex-wrap gap-2">
+        
+        <!-- Device Switcher -->
+        <div class="flex items-center gap-1.5" style="background: rgba(15, 23, 42, 0.8); border: 1px solid #334155; border-radius: 8px; padding: 0.25rem 0.5rem;">
+          <span style="font-size: 0.72rem; color: var(--text-dim); font-weight: 600;">DEVICE:</span>
+          <select id="device-selector" class="form-select" style="width: auto; padding: 0.2rem 0.5rem; font-size: 0.78rem; background: transparent; border: none;" onchange="handleDeviceSwitch(this.value)">
+            <option value="">Loading devices...</option>
+          </select>
+          <button type="button" class="btn btn-dark btn-sm" onclick="openAddDeviceModal()" title="Add another device">+ Add</button>
+        </div>
+
+        <!-- Guided Mode Badge & Toggle Button -->
+        <div id="guided-mode-badge" class="pill pill-slate">GUIDED MODE: OFF</div>
+        <button type="button" id="btn-toggle-guided" class="btn btn-cyan btn-sm" onclick="promptGuidedModeToggle()">
+          Lock Handover
+        </button>
+
+        <!-- Uninstall Lock Widget -->
+        <div id="uninstall-lock-container" class="flex items-center gap-1.5">
+          <span id="uninstall-pill" class="pill pill-rose">UNINSTALL: PROTECTED</span>
+          <button type="button" id="btn-uninstall-action" class="btn btn-dark btn-sm" onclick="handleUninstallAction()">
+            Unlock (10m)
+          </button>
+        </div>
+
+        <!-- Logout Button -->
+        <button type="button" class="btn btn-dark btn-sm" onclick="handleLogout()" title="Sign out">
+          Sign Out
+        </button>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- ======================================================================== -->
+  <!-- MAIN WORKSPACE -->
+  <!-- ======================================================================== -->
+  <main class="container" style="padding-top: 1.5rem; padding-bottom: 2.5rem; flex: 1;">
+
+    <!-- ====================================================================== -->
+    <!-- EMERGENCY WAIVER INBOX (HIGH-VISIBILITY TOP BANNER) -->
+    <!-- ====================================================================== -->
+    <section id="waiver-inbox-section" style="display: none; margin-bottom: 1.5rem;">
+      <div class="cyber-card" style="border-color: rgba(245, 158, 11, 0.6); background: rgba(30, 25, 10, 0.9);">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <span class="pill pill-amber">⚠️ PENDING EMERGENCY WAIVER</span>
+            <span style="font-size: 0.8rem; color: #fde68a;">Target device requested temporary exception</span>
+          </div>
+          <span id="pending-waiver-count" class="pill pill-amber">1 PENDING</span>
+        </div>
+        <div id="pending-waiver-cards" class="grid gap-2"></div>
+      </div>
+    </section>
+
+    <!-- ACTIVE WAIVERS ROW (IF ANY) -->
+    <section id="active-waivers-row" style="display: none; margin-bottom: 1.5rem;">
+      <div class="cyber-card" style="border-color: rgba(16, 185, 129, 0.4); background: rgba(6, 25, 20, 0.85);">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="pill pill-emerald">🟢 ACTIVE EMERGENCY WAIVERS</span>
+            <span style="font-size: 0.78rem; color: #a7f3d0;">Temporary bypass granted. Enforcer will auto-resume upon expiration.</span>
+          </div>
+          <div id="active-waiver-pills" class="flex items-center gap-2 flex-wrap"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================================== -->
+    <!-- ROW 1: DEVICE IDENTITY CARD (PAIRING KEY) + KPI METRICS -->
+    <!-- ====================================================================== -->
+    <div class="grid grid-cols-12 gap-4" style="margin-bottom: 1.5rem;">
+      
+      <!-- Device Identity Card (5 cols) -->
+      <div class="col-span-5 identity-card flex flex-col justify-between">
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <span style="font-size: 0.72rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.08em;">
+              DEVICE IDENTITY CARD
+            </span>
+            <span id="card-paired-status" class="pill pill-slate">AWAITING PAIRING</span>
+          </div>
+
+          <h2 id="card-device-name" style="font-size: 1.25rem; font-weight: 800; color: #fff; margin-bottom: 0.25rem;">
+            Primary Android Device
+          </h2>
+          <div id="card-device-model" style="font-size: 0.78rem; color: var(--text-dim); font-family: var(--font-mono); margin-bottom: 0.75rem;">
+            Model: Pending initial handshake
+          </div>
+
+          <div style="margin-bottom: 0.75rem;">
+            <span style="font-size: 0.7rem; color: var(--text-muted); display: block; margin-bottom: 0.25rem;">PAIRING KEY (IDENTITY CODE):</span>
+            <div class="flex items-center gap-2">
+              <span id="card-pairing-key" class="key-box">VYR-XXXX-XXXX</span>
+              <button type="button" class="btn btn-cyan btn-sm" onclick="copyPairingKey()">Copy Key</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between pt-2" style="border-top: 1px solid rgba(51, 65, 85, 0.4); font-size: 0.72rem; color: var(--text-dim); font-family: var(--font-mono);">
+          <span id="card-last-seen">Last Synced: Never</span>
+          <button type="button" class="btn btn-dark btn-sm" onclick="regenerateDeviceKey()" title="Revoke and generate new key">
+            Regenerate Key
+          </button>
+        </div>
+      </div>
+
+      <!-- KPI Metrics (7 cols) -->
+      <div class="col-span-7 grid grid-cols-2 gap-3">
+        
+        <!-- KPI 1: Managed Apps -->
+        <div class="cyber-card flex flex-col justify-between">
+          <div class="flex items-center justify-between">
+            <span class="form-label">Managed Apps</span>
+            <span class="pill pill-cyan">PHONE SYNC</span>
+          </div>
+          <div style="font-size: 2rem; font-weight: 800; font-family: var(--font-mono); color: #fff;" id="kpi-apps-count">0</div>
+          <div style="font-size: 0.72rem; color: var(--text-muted); display: flex; justify-content: space-between;">
+            <span>Configured Policies:</span>
+            <span id="kpi-policies-count" class="font-mono text-cyan" style="color: #38bdf8;">0</span>
+          </div>
+        </div>
+
+        <!-- KPI 2: Blocked Events Today -->
+        <div class="cyber-card flex flex-col justify-between">
+          <div class="flex items-center justify-between">
+            <span class="form-label">Blocked Today</span>
+            <span class="pill pill-rose">ZERO-LEAKAGE</span>
+          </div>
+          <div style="font-size: 2rem; font-weight: 800; font-family: var(--font-mono); color: #f43f5e;" id="kpi-blocked-count">0</div>
+          <div style="font-size: 0.72rem; color: var(--text-muted); display: flex; justify-content: space-between;">
+            <span>Total Inspected:</span>
+            <span id="kpi-total-logs-count" class="font-mono">0</span>
+          </div>
+        </div>
+
+        <!-- KPI 3: Active Waivers -->
+        <div class="cyber-card flex flex-col justify-between">
+          <div class="flex items-center justify-between">
+            <span class="form-label">Active Waivers</span>
+            <span class="pill pill-amber">EMERGENCY</span>
+          </div>
+          <div style="font-size: 2rem; font-weight: 800; font-family: var(--font-mono); color: #fbbf24;" id="kpi-waivers-count">0</div>
+          <div style="font-size: 0.72rem; color: var(--text-muted); display: flex; justify-content: space-between;">
+            <span>Pending Inbound:</span>
+            <span id="kpi-pending-waivers" class="font-mono text-amber" style="color: #f59e0b;">0</span>
+          </div>
+        </div>
+
+        <!-- KPI 4: Protection Status -->
+        <div class="cyber-card flex flex-col justify-between">
+          <div class="flex items-center justify-between">
+            <span class="form-label">Enforcer State</span>
+            <span class="pill pill-emerald" id="kpi-protection-pill">ACTIVE</span>
+          </div>
+          <div style="font-size: 1.4rem; font-weight: 800; font-family: var(--font-mono); color: #34d399;" id="kpi-protection-title">PROTECTED</div>
+          <div style="font-size: 0.72rem; color: var(--text-muted); display: flex; justify-content: space-between;">
+            <span>Uninstall Status:</span>
+            <span id="kpi-uninstall-status" class="font-mono text-rose" style="color: #fb7185;">LOCKED</span>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- ====================================================================== -->
+    <!-- ROW 2: LIGHTWEIGHT NATIVE HTML5 CANVAS CHARTS (ZERO EXTERNAL CDNs) -->
+    <!-- ====================================================================== -->
+    <div class="grid grid-cols-2 gap-4" style="margin-bottom: 1.5rem;">
+      
+      <!-- Chart 1: Traffic Verdict (Native Doughnut) -->
+      <div class="cyber-card">
+        <div class="flex items-center justify-between mb-2">
+          <div>
+            <h3 style="font-size: 0.9rem; font-weight: 700; color: #fff;">Traffic Verdict Ratio</h3>
+            <p style="font-size: 0.72rem; color: var(--text-muted);">Allowed vs. Blocked vs. Waived events</p>
+          </div>
+          <span class="pill pill-cyan">NATIVE CANVAS</span>
+        </div>
+        <div class="chart-box">
+          <canvas id="canvas-verdict" width="340" height="220"></canvas>
+        </div>
+      </div>
+
+      <!-- Chart 2: Top Apps by Usage vs. Limit (Native Bar Chart) -->
+      <div class="cyber-card">
+        <div class="flex items-center justify-between mb-2">
+          <div>
+            <h3 style="font-size: 0.9rem; font-weight: 700; color: #fff;">Top Apps Daily Screen-Time</h3>
+            <p style="font-size: 0.72rem; color: var(--text-muted);">Today's minutes used vs. daily quota limit</p>
+          </div>
+          <span class="pill pill-purple">USAGE TELEMETRY</span>
+        </div>
+        <div class="chart-box">
+          <canvas id="canvas-usage" width="460" height="220"></canvas>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ====================================================================== -->
+    <!-- ROW 3: 100+ APPS MANAGER (CORE FEATURE) -->
+    <!-- ====================================================================== -->
+    <section class="cyber-card" style="margin-bottom: 1.5rem;">
+      <div class="flex items-center justify-between flex-wrap gap-3 pb-3 mb-3" style="border-bottom: 1px solid var(--border-dim);">
+        <div>
+          <div class="flex items-center gap-2">
+            <h2 style="font-size: 1.05rem; font-weight: 800; color: #fff;">Installed Apps & Granular Governance</h2>
+            <span class="pill pill-cyan" id="apps-total-badge">0 APPS</span>
+          </div>
+          <p style="font-size: 0.75rem; color: var(--text-muted);">Configure 24/7 Full Blocks, Quiet-Hour Schedules, or Daily Usage Quotas per app.</p>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button type="button" class="btn btn-purple btn-sm" onclick="openAddManualAppModal()">+ Add App Manually</button>
+        </div>
+      </div>
+
+      <!-- App Search & Filter Controls -->
+      <div class="flex items-center justify-between flex-wrap gap-2 mb-3">
+        <div class="tab-group" id="apps-filter-tabs">
+          <button type="button" class="tab-btn active" data-filter="all" onclick="filterApps('all')">All Apps (<span id="count-all-apps">0</span>)</button>
+          <button type="button" class="tab-btn" data-filter="restricted" onclick="filterApps('restricted')">Restricted (<span id="count-restricted-apps">0</span>)</button>
+          <button type="button" class="tab-btn" data-filter="scheduled" onclick="filterApps('scheduled')">Scheduled (<span id="count-scheduled-apps">0</span>)</button>
+          <button type="button" class="tab-btn" data-filter="unrestricted" onclick="filterApps('unrestricted')">Unrestricted (<span id="count-unrestricted-apps">0</span>)</button>
+        </div>
+
+        <div style="min-width: 220px;">
+          <input type="text" id="input-search-apps" class="form-input" placeholder="Search 100+ apps..." oninput="handleAppSearch(this.value)">
+        </div>
+      </div>
+
+      <!-- Scrollable Apps Table Container -->
+      <div style="max-height: 480px; overflow-y: auto;">
+        <table class="cyber-table">
+          <thead>
+            <tr>
+              <th>App Name & Package</th>
+              <th>Today's Usage</th>
+              <th>Enforcement Mode</th>
+              <th>Schedule / Quota</th>
+              <th>Active</th>
+              <th style="text-align: right;">Action</th>
+            </tr>
+          </thead>
+          <tbody id="apps-table-body">
+            <tr>
+              <td colspan="6" style="text-align: center; color: var(--text-dim); padding: 2rem 0;">
+                Loading installed applications...
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ====================================================================== -->
+    <!-- ROW 4: NETWORK RULES (DNS/IP) + LIVE SIMULATOR & LOGS (2-COL GRID) -->
+    <!-- ====================================================================== -->
+    <div class="grid grid-cols-12 gap-4">
+      
+      <!-- LEFT: DNS & IP Filtering Rules (6 cols) -->
+      <div class="col-span-12 col-span-7 flex flex-col gap-4">
+        
+        <!-- Add Network Rule Box -->
+        <div class="cyber-card">
+          <div class="flex items-center justify-between pb-2 mb-3" style="border-bottom: 1px solid var(--border-dim);">
+            <h3 style="font-size: 0.9rem; font-weight: 700; color: #fff;">Deploy DNS & IP Rule</h3>
+            <span class="pill pill-cyan">KERNEL SPLIT-TUNNEL</span>
+          </div>
+
+          <form id="form-add-rule" onsubmit="handleAddNetworkRule(event)">
+            <div class="grid grid-cols-2 gap-2 mb-2">
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">Rule Type</label>
+                <select id="rule-type" class="form-select" onchange="handleRuleTypeChange(this.value)">
+                  <option value="domain">DNS Domain</option>
+                  <option value="ip">IP Address</option>
+                </select>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">Action</label>
+                <select id="rule-action" class="form-select">
+                  <option value="BLOCK">BLOCK (Drop Packet)</option>
+                  <option value="ALLOW">ALLOW (Whitelist Override)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Target Identifier</label>
+              <input type="text" id="rule-target" class="form-input" placeholder="e.g. instagram.com or reels.instagram.com" required>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2 mb-3">
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">Duration Limit</label>
+                <select id="rule-duration" class="form-select">
+                  <option value="">Permanent Rule</option>
+                  <option value="1">1 Minute (Hackathon Demo)</option>
+                  <option value="15">15 Minutes</option>
+                  <option value="60">60 Minutes</option>
+                  <option value="180">3 Hours</option>
+                </select>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">Rationale / Note</label>
+                <input type="text" id="rule-note" class="form-input" placeholder="e.g. Exam week distraction lock">
+              </div>
+            </div>
+
+            <button type="submit" class="btn btn-cyan btn-full">Deploy Network Rule</button>
+          </form>
+        </div>
+
+        <!-- Rules Table -->
+        <div class="cyber-card">
+          <div class="flex items-center justify-between pb-2 mb-3" style="border-bottom: 1px solid var(--border-dim);">
+            <div class="flex items-center gap-2">
+              <h3 style="font-size: 0.9rem; font-weight: 700; color: #fff;">Active Network Rules</h3>
+              <span id="rules-count-badge" class="pill pill-cyan">0 RULES</span>
+            </div>
+            <div class="tab-group" id="rules-filter-tabs">
+              <button type="button" class="tab-btn active" data-tab="all" onclick="filterRules('all')">All</button>
+              <button type="button" class="tab-btn" data-tab="domain" onclick="filterRules('domain')">DNS</button>
+              <button type="button" class="tab-btn" data-tab="ip" onclick="filterRules('ip')">IP</button>
+              <button type="button" class="tab-btn" data-tab="timed" onclick="filterRules('timed')">Timed</button>
+            </div>
+          </div>
+
+          <div style="max-height: 320px; overflow-y: auto;">
+            <table class="cyber-table">
+              <thead>
+                <tr>
+                  <th>Type</th>
+                  <th>Target</th>
+                  <th>Action</th>
+                  <th>Expiry / Note</th>
+                  <th>Active</th>
+                  <th style="text-align: right;">Action</th>
+                </tr>
+              </thead>
+              <tbody id="rules-table-body">
+                <tr><td colspan="6" style="text-align: center; color: var(--text-dim); padding: 1.5rem 0;">No network rules configured.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- RIGHT: Interactive Policy Simulator & Live Log Feed (6 cols) -->
+      <div class="col-span-12 col-span-5 flex flex-col gap-4">
+        
+        <!-- Flashing Blocked Alert Banner (Triggered when blocked event occurs) -->
+        <div id="blocked-alert-banner" class="alert-flashing" style="display: none;">
+          <span>🚨 BLOCKED CONNECTION DETECTED</span>
+        </div>
+
+        <!-- Interactive Policy Simulator -->
+        <div class="cyber-card" style="border-color: rgba(168, 85, 247, 0.4);">
+          <div class="flex items-center justify-between pb-2 mb-3" style="border-bottom: 1px solid var(--border-dim);">
+            <div>
+              <h3 style="font-size: 0.9rem; font-weight: 700; color: #fff;">Test Live Policy Engine</h3>
+              <p style="font-size: 0.72rem; color: var(--text-muted);">Simulate app, domain, or IP requests against MySQL rules & waivers</p>
+            </div>
+            <span class="pill pill-purple">SIMULATOR</span>
+          </div>
+
+          <form id="form-simulate" onsubmit="handleSimulate(event)">
+            <div class="grid grid-cols-3 gap-2 mb-2">
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">Type</label>
+                <select id="sim-type" class="form-select">
+                  <option value="domain">Domain</option>
+                  <option value="ip">IP</option>
+                  <option value="app">App Package</option>
+                </select>
+              </div>
+
+              <div class="form-group" style="margin-bottom: 0; grid-column: span 2;">
+                <label class="form-label">Target</label>
+                <input type="text" id="sim-target" class="form-input" placeholder="e.g. reels.instagram.com" required>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2 mb-3">
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">Simulated Time (HH:MM)</label>
+                <input type="text" id="sim-time" class="form-input" placeholder="17:30" maxlength="5">
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label">Simulated Used (Mins)</label>
+                <input type="number" id="sim-used-mins" class="form-input" placeholder="45" min="0">
+              </div>
+            </div>
+
+            <!-- Quick Presets -->
+            <div style="margin-bottom: 0.75rem;">
+              <span style="font-size: 0.68rem; color: var(--text-dim); display: block; margin-bottom: 0.25rem;">QUICK TEST PRESETS:</span>
+              <div class="flex gap-1 flex-wrap">
+                <button type="button" class="btn btn-dark btn-sm" onclick="setSimPreset('domain', 'reels.instagram.com', '12:00', 0)">reels.instagram.com</button>
+                <button type="button" class="btn btn-dark btn-sm" onclick="setSimPreset('domain', 'wikipedia.org', '12:00', 0)">wikipedia.org</button>
+                <button type="button" class="btn btn-dark btn-sm" onclick="setSimPreset('app', 'com.instagram.android', '17:30', 20)">Instagram (17:30)</button>
+                <button type="button" class="btn btn-dark btn-sm" onclick="setSimPreset('app', 'com.google.android.youtube', '12:00', 65)">YouTube (65m used)</button>
+              </div>
+            </div>
+
+            <button type="submit" class="btn btn-purple btn-full">Evaluate Connection Request</button>
+          </form>
+
+          <!-- Verdict Result Card -->
+          <div id="sim-verdict-box" style="display: none; margin-top: 0.75rem; padding: 0.75rem; border-radius: 8px;">
+            <div class="flex items-center justify-between mb-1">
+              <span id="sim-verdict-badge" class="pill">STATUS</span>
+              <span id="sim-verdict-time" style="font-size: 0.72rem; color: var(--text-dim); font-family: var(--font-mono);">JUST NOW</span>
+            </div>
+            <div id="sim-verdict-target" style="font-size: 0.82rem; font-weight: 700; font-family: var(--font-mono); color: #fff; margin-bottom: 0.25rem;"></div>
+            <div id="sim-verdict-reason" style="font-size: 0.75rem; color: #cbd5e1;"></div>
+          </div>
+        </div>
+
+        <!-- Telemetry Activity Logs -->
+        <div class="cyber-card">
+          <div class="flex items-center justify-between pb-2 mb-2" style="border-bottom: 1px solid var(--border-dim);">
+            <div class="flex items-center gap-2">
+              <h3 style="font-size: 0.9rem; font-weight: 700; color: #fff;">Live Telemetry Feed</h3>
+              <span id="logs-count-badge" class="pill pill-cyan">0 LOGS</span>
+            </div>
+            <button type="button" class="btn btn-rose btn-sm" onclick="promptClearLogs()">Clear Logs</button>
+          </div>
+
+          <div class="flex items-center justify-between gap-2 mb-2">
+            <div class="tab-group" id="logs-filter-tabs">
+              <button type="button" class="tab-btn active" data-status="ALL" onclick="filterLogs('ALL')">All</button>
+              <button type="button" class="tab-btn" data-status="BLOCKED" onclick="filterLogs('BLOCKED')">Blocked</button>
+              <button type="button" class="tab-btn" data-status="WAIVED" onclick="filterLogs('WAIVED')">Waived</button>
+              <button type="button" class="tab-btn" data-status="ALLOWED" onclick="filterLogs('ALLOWED')">Allowed</button>
+            </div>
+            <input type="text" id="input-search-logs" class="form-input" placeholder="Search logs..." style="max-width: 150px; padding: 0.2rem 0.5rem;" oninput="handleLogSearch(this.value)">
+          </div>
+
+          <div id="logs-feed-container" style="max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.35rem;">
+            <div style="text-align: center; color: var(--text-dim); padding: 1.5rem 0; font-size: 0.8rem;">
+              Waiting for live telemetry packets...
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- ======================================================================== -->
+  <!-- MODALS -->
+  <!-- ======================================================================== -->
+
+  <!-- MODAL 1: SUPERVISOR PIN AUTHENTICATION -->
+  <div id="modal-pin" class="modal-overlay hidden" onclick="handleBackdropClick(event, 'modal-pin')">
+    <div class="modal-dialog">
+      <div class="flex items-center gap-3 mb-3">
+        <div style="font-size: 1.5rem;">🔒</div>
+        <div>
+          <h3 id="modal-pin-title" style="font-size: 1.05rem; font-weight: 800; color: #fff;">Supervisor Authentication</h3>
+          <p id="modal-pin-desc" style="font-size: 0.75rem; color: var(--text-muted);">Enter your Supervisor PIN to continue</p>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Supervisor PIN</label>
+        <input type="password" id="input-supervisor-pin" class="form-input" style="text-align: center; font-size: 1.3rem; letter-spacing: 0.2em;" maxlength="8" placeholder="••••" autocomplete="off">
+        <span style="font-size: 0.72rem; color: var(--text-dim); text-align: center; display: block; margin-top: 0.25rem;">
+          Default hackathon demo PIN: <strong style="color: #38bdf8;">1234</strong>
+        </span>
+      </div>
+
+      <div id="modal-pin-error" style="display: none; padding: 0.4rem; background: rgba(244, 63, 94, 0.15); border: 1px solid rgba(244, 63, 94, 0.4); border-radius: 6px; color: #fb7185; font-size: 0.75rem; text-align: center; margin-bottom: 0.75rem;"></div>
+
+      <div class="flex gap-2">
+        <button type="button" class="btn btn-dark flex-1" onclick="closeModal('modal-pin')">Cancel</button>
+        <button type="button" id="btn-confirm-pin" class="btn btn-cyan flex-1" onclick="executePinAction()">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL 2: CONFIGURE APP POLICY -->
+  <div id="modal-policy" class="modal-overlay hidden" onclick="handleBackdropClick(event, 'modal-policy')">
+    <div class="modal-dialog">
+      <div class="flex items-center justify-between mb-3">
+        <div>
+          <h3 style="font-size: 1.05rem; font-weight: 800; color: #fff;">Configure Governance Policy</h3>
+          <p id="policy-modal-appname" style="font-size: 0.75rem; color: #38bdf8; font-family: var(--font-mono);">com.example.app</p>
+        </div>
+        <button type="button" class="btn btn-dark btn-sm" onclick="closeModal('modal-policy')">✕</button>
+      </div>
+
+      <form id="form-configure-policy" onsubmit="handleSavePolicy(event)">
+        <input type="hidden" id="policy-pkg">
+        <input type="hidden" id="policy-display-name">
+
+        <div class="form-group">
+          <label class="form-label">Enforcement Mode</label>
+          <select id="policy-mode" class="form-select" onchange="handlePolicyModeChange(this.value)">
+            <option value="ALLOW">ALLOW (No Restrictions)</option>
+            <option value="BLOCK">BLOCK (Completely Restricted 24/7)</option>
+            <option value="SCHEDULE">SCHEDULE (Block During Daily Time Window)</option>
+            <option value="DAILY_LIMIT">DAILY_LIMIT (Allow Up to X Minutes / Day)</option>
+          </select>
+        </div>
+
+        <!-- Schedule Options -->
+        <div id="policy-schedule-fields" style="display: none;" class="grid grid-cols-2 gap-2 mb-2">
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label">Schedule Start (24h)</label>
+            <input type="text" id="policy-start" class="form-input" placeholder="16:00" maxlength="5">
+          </div>
+          <div class="form-group" style="margin-bottom: 0;">
+            <label class="form-label">Schedule End (24h)</label>
+            <input type="text" id="policy-end" class="form-input" placeholder="21:00" maxlength="5">
+          </div>
+          <span style="grid-column: span 2; font-size: 0.7rem; color: var(--text-dim);">
+            e.g. 16:00 to 21:00 (Blocks from 4 PM to 9 PM). Supports overnight windows (e.g. 22:00 to 07:00).
+          </span>
+        </div>
+
+        <!-- Daily Limit Options -->
+        <div id="policy-limit-fields" style="display: none;" class="form-group">
+          <label class="form-label">Daily Usage Allowance (Minutes)</label>
+          <input type="number" id="policy-limit-mins" class="form-input" placeholder="60" min="1">
+          <span style="font-size: 0.7rem; color: var(--text-dim);">
+            Once the device hits this quota today, the VYRON Guided Pause screen will engage.
+          </span>
+        </div>
+
+        <div class="form-group">
+          <label class="flex items-center gap-2" style="cursor: pointer;">
+            <input type="checkbox" id="policy-active" checked>
+            <span style="font-size: 0.8rem; color: #fff; font-weight: 600;">Enable this policy rule immediately</span>
+          </label>
+        </div>
+
+        <div class="flex gap-2" style="margin-top: 1rem;">
+          <button type="button" class="btn btn-dark flex-1" onclick="closeModal('modal-policy')">Cancel</button>
+          <button type="submit" class="btn btn-cyan flex-1">Save Policy</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL 3: ADD APP MANUALLY -->
+  <div id="modal-add-app" class="modal-overlay hidden" onclick="handleBackdropClick(event, 'modal-add-app')">
+    <div class="modal-dialog">
+      <div class="flex items-center justify-between mb-3">
+        <h3 style="font-size: 1.05rem; font-weight: 800; color: #fff;">Add App by Package Name</h3>
+        <button type="button" class="btn btn-dark btn-sm" onclick="closeModal('modal-add-app')">✕</button>
+      </div>
+
+      <form id="form-manual-app" onsubmit="handleManualAppSubmit(event)">
+        <div class="form-group">
+          <label class="form-label">Android Package Name</label>
+          <input type="text" id="manual-app-pkg" class="form-input" placeholder="e.g. com.snapchat.android" required>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Display App Name</label>
+          <input type="text" id="manual-app-name" class="form-input" placeholder="e.g. Snapchat">
+        </div>
+
+        <div class="flex gap-2" style="margin-top: 1rem;">
+          <button type="button" class="btn btn-dark flex-1" onclick="closeModal('modal-add-app')">Cancel</button>
+          <button type="submit" class="btn btn-purple flex-1">Register App</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL 4: ADD DEVICE -->
+  <div id="modal-add-device" class="modal-overlay hidden" onclick="handleBackdropClick(event, 'modal-add-device')">
+    <div class="modal-dialog">
+      <div class="flex items-center justify-between mb-3">
+        <h3 style="font-size: 1.05rem; font-weight: 800; color: #fff;">Link New Android Device</h3>
+        <button type="button" class="btn btn-dark btn-sm" onclick="closeModal('modal-add-device')">✕</button>
+      </div>
+
+      <form id="form-new-device" onsubmit="handleNewDeviceSubmit(event)">
+        <div class="form-group">
+          <label class="form-label">Device Nickname</label>
+          <input type="text" id="new-device-name" class="form-input" placeholder="e.g. Anish's Study Tablet" required>
+        </div>
+
+        <p style="font-size: 0.75rem; color: var(--text-dim); margin-bottom: 1rem;">
+          Creating a device produces an Identity Card (Pairing Key) to enter into the VYRON Android app.
+        </p>
+
+        <div class="flex gap-2">
+          <button type="button" class="btn btn-dark flex-1" onclick="closeModal('modal-add-device')">Cancel</button>
+          <button type="submit" class="btn btn-cyan flex-1">Generate Identity Card</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- TOAST NOTIFICATION STACK -->
+  <div id="toast-stack"></div>
+
+  <!-- PURE LOCAL JAVASCRIPT CONTROLLER (ZERO EXTERNAL CDNs) -->
+  <script src="/static/js/dashboard.js"></script>
+</body>
+</html>

@@ -1,34 +1,32 @@
 /**
- * VYRON Control Panel Dashboard
- * Rock-Solid Cyber-Telemetry Client Logic
+ * VYRON Control Panel SPA Controller
+ * 100% Closed-Loop, Zero-External-CDN Architecture
+ * Native HTML5 Canvas Data Visualizations
  */
 
 // Application State
 const state = {
-  rules: [],
+  devices: [],
+  currentDeviceId: null,
+  deviceData: null,
+  apps: [],
+  networkRules: [],
   logs: [],
+  activeWaivers: [],
+  pendingWaivers: [],
   stats: {},
-  settings: {
-    guided_mode: false,
-    device_name: 'Android Handover Device',
-  },
-  activeRuleTab: 'all',
-  ruleSearchQuery: '',
-  activeLogFilter: 'ALL',
+  appSearchQuery: '',
+  appFilterTab: 'all',
+  ruleFilterTab: 'all',
+  logFilterStatus: 'ALL',
   logSearchQuery: '',
-  lastBlockedLogId: null,
   isFetching: false,
-  selectedDurationMins: '',
-  pinAction: null, // 'toggle_mode' or 'clear_logs'
+  pinAction: null, // 'guided_mode', 'uninstall_permission', 'clear_logs'
+  alertTimeout: null,
 };
 
-// Global Chart Instances
-let trafficVerdictChart = null;
-let rulesBreakdownChart = null;
-let alertBannerTimeout = null;
-
 // ============================================================================
-// UTILITIES & ESCAPING
+// UTILITIES & XSS ESCAPING
 // ============================================================================
 
 function escapeHtml(str) {
@@ -45,46 +43,33 @@ function showToast(message, type = 'info') {
   const stack = document.getElementById('toast-stack');
   if (!stack) return;
 
-  const toast = document.createElement('div');
-  toast.className = `toast-enter pointer-events-auto flex items-center justify-between p-3 rounded-xl border shadow-xl text-xs font-semibold backdrop-blur-md transition-all ${
-    type === 'success'
-      ? 'bg-emerald-950/90 border-emerald-500/60 text-emerald-200'
-      : type === 'error'
-      ? 'bg-rose-950/90 border-rose-500/60 text-rose-200'
-      : 'bg-cyan-950/90 border-cyan-500/60 text-cyan-200'
-  }`;
+  const item = document.createElement('div');
+  item.className = 'toast-item';
+  item.style.backgroundColor =
+    type === 'success' ? 'rgba(5, 150, 105, 0.95)' :
+    type === 'error' ? 'rgba(225, 29, 72, 0.95)' :
+    'rgba(2, 132, 199, 0.95)';
+  item.style.color = '#fff';
+  item.style.border = '1px solid rgba(255, 255, 255, 0.2)';
 
-  const iconSvg =
-    type === 'success'
-      ? `<svg class="w-4 h-4 mr-2 text-emerald-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>`
-      : type === 'error'
-      ? `<svg class="w-4 h-4 mr-2 text-rose-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>`
-      : `<svg class="w-4 h-4 mr-2 text-cyan-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`;
-
-  toast.innerHTML = `
-    <div class="flex items-center">
-      ${iconSvg}
-      <span>${escapeHtml(message)}</span>
-    </div>
-    <button class="ml-3 text-slate-400 hover:text-white" onclick="this.parentElement.remove()">
-      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-    </button>
+  item.innerHTML = `
+    <span>${escapeHtml(message)}</span>
+    <button style="background:none; border:none; color:#fff; cursor:pointer; margin-left:0.75rem; font-weight:bold;" onclick="this.parentElement.remove()">✕</button>
   `;
 
-  stack.appendChild(toast);
-
+  stack.appendChild(item);
   setTimeout(() => {
-    toast.classList.remove('toast-enter');
-    toast.classList.add('toast-exit');
-    setTimeout(() => toast.remove(), 250);
+    item.style.opacity = '0';
+    item.style.transition = 'opacity 0.25s ease';
+    setTimeout(() => item.remove(), 250);
   }, 3500);
 }
 
-function formatCountdown(totalSeconds) {
-  if (totalSeconds <= 0) return 'Expired';
-  const m = Math.floor(totalSeconds / 60);
-  const s = totalSeconds % 60;
-  if (m > 60) {
+function formatSeconds(sec) {
+  if (sec <= 0) return 'Expired';
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  if (m >= 60) {
     const h = Math.floor(m / 60);
     const remM = m % 60;
     return `${h}h ${remM}m`;
@@ -95,8 +80,8 @@ function formatCountdown(totalSeconds) {
 function formatIsoTime(isoStr) {
   if (!isoStr) return '';
   try {
-    const date = new Date(isoStr);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    const d = new Date(isoStr);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
   } catch (e) {
     return isoStr;
   }
@@ -105,136 +90,179 @@ function formatIsoTime(isoStr) {
 function triggerBlockedAlert() {
   const banner = document.getElementById('blocked-alert-banner');
   if (!banner) return;
-
-  banner.classList.remove('hidden');
-  if (alertBannerTimeout) {
-    clearTimeout(alertBannerTimeout);
-  }
-  alertBannerTimeout = setTimeout(() => {
-    banner.classList.add('hidden');
+  banner.style.display = 'flex';
+  if (state.alertTimeout) clearTimeout(state.alertTimeout);
+  state.alertTimeout = setTimeout(() => {
+    banner.style.display = 'none';
   }, 3500);
 }
 
 // ============================================================================
-// CHARTS INITIALIZATION (ONCE ON STARTUP)
+// NATIVE HTML5 CANVAS CHARTS (ZERO EXTERNAL CDNs)
 // ============================================================================
 
-function initCharts() {
-  // Chart 1: Traffic Verdict (Doughnut)
-  const ctxTraffic = document.getElementById('trafficVerdictChart')?.getContext('2d');
-  if (ctxTraffic) {
-    trafficVerdictChart = new Chart(ctxTraffic, {
-      type: 'doughnut',
-      data: {
-        labels: ['Allowed Traffic', 'Blocked Requests'],
-        datasets: [
-          {
-            data: [0, 0],
-            backgroundColor: ['#10b981', '#f43f5e'],
-            borderColor: '#0a0e1a',
-            borderWidth: 3,
-            hoverOffset: 4,
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        cutout: '72%',
-        plugins: {
-          legend: {
-            position: 'bottom',
-            labels: {
-              boxWidth: 12,
-              padding: 14,
-              color: '#94a3b8',
-              font: { family: 'Plus Jakarta Sans', size: 11, weight: '500' },
-            },
-          },
-          tooltip: {
-            backgroundColor: '#0f172a',
-            borderColor: '#334155',
-            borderWidth: 1,
-            titleFont: { family: 'JetBrains Mono', size: 12 },
-            bodyFont: { family: 'Plus Jakarta Sans', size: 12 },
-          },
-        },
-      },
-    });
+function drawVerdictDoughnut(allowed, blocked, waived) {
+  const canvas = document.getElementById('canvas-verdict');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width;
+  const h = canvas.height;
+
+  ctx.clearRect(0, 0, w, h);
+
+  const total = allowed + blocked + waived;
+  const cx = w / 2 - 35;
+  const cy = h / 2;
+  const radius = Math.min(cx, cy) - 15;
+  const innerRadius = radius * 0.68;
+
+  if (total === 0) {
+    // Draw empty ring
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, 2 * Math.PI);
+    ctx.arc(cx, cy, innerRadius, 2 * Math.PI, 0, true);
+    ctx.fillStyle = '#1e293b';
+    ctx.fill();
+
+    ctx.fillStyle = '#64748b';
+    ctx.font = '12px ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('NO DATA', cx, cy + 4);
+    return;
   }
 
-  // Chart 2: Active Rules Breakdown (Bar)
-  const ctxRules = document.getElementById('rulesBreakdownChart')?.getContext('2d');
-  if (ctxRules) {
-    rulesBreakdownChart = new Chart(ctxRules, {
-      type: 'bar',
-      data: {
-        labels: ['DNS Domains', 'IP Addresses', 'Android Apps'],
-        datasets: [
-          {
-            label: 'Active Rules',
-            data: [0, 0, 0],
-            backgroundColor: ['#06b6d4', '#a855f7', '#10b981'],
-            borderRadius: 6,
-            barThickness: 32,
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: {
-          x: {
-            grid: { display: false },
-            ticks: {
-              color: '#94a3b8',
-              font: { family: 'Plus Jakarta Sans', size: 11, weight: '500' },
-            },
-          },
-          y: {
-            beginAtZero: true,
-            ticks: {
-              stepSize: 1,
-              color: '#64748b',
-              font: { family: 'JetBrains Mono', size: 10 },
-            },
-            grid: { color: 'rgba(51, 65, 85, 0.3)' },
-          },
-        },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            backgroundColor: '#0f172a',
-            borderColor: '#334155',
-            borderWidth: 1,
-            titleFont: { family: 'JetBrains Mono', size: 12 },
-            bodyFont: { family: 'Plus Jakarta Sans', size: 12 },
-          },
-        },
-      },
-    });
-  }
+  const data = [
+    { label: 'Allowed', value: allowed, color: '#10b981' },
+    { label: 'Blocked', value: blocked, color: '#f43f5e' },
+    { label: 'Waived', value: waived, color: '#f59e0b' }
+  ];
+
+  let startAngle = -Math.PI / 2;
+
+  data.forEach(item => {
+    if (item.value <= 0) return;
+    const sliceAngle = (item.value / total) * 2 * Math.PI;
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, startAngle, startAngle + sliceAngle);
+    ctx.arc(cx, cy, innerRadius, startAngle + sliceAngle, startAngle, true);
+    ctx.closePath();
+    ctx.fillStyle = item.color;
+    ctx.fill();
+
+    startAngle += sliceAngle;
+  });
+
+  // Center text (Total & Rate)
+  const blockRate = total > 0 ? Math.round((blocked / total) * 100) : 0;
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 20px ui-monospace, monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(blocked.toString(), cx, cy);
+
+  ctx.fillStyle = '#94a3b8';
+  ctx.font = '10px ui-sans-serif, sans-serif';
+  ctx.fillText(`BLOCKED (${blockRate}%)`, cx, cy + 16);
+
+  // Draw Legend beside doughnut
+  const legX = w - 100;
+  let legY = h / 2 - 30;
+
+  data.forEach(item => {
+    ctx.fillStyle = item.color;
+    ctx.beginPath();
+    ctx.arc(legX, legY + 5, 4, 0, 2 * Math.PI);
+    ctx.fill();
+
+    ctx.fillStyle = '#e2e8f0';
+    ctx.font = '11px ui-sans-serif, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(item.label, legX + 10, legY + 8);
+
+    ctx.fillStyle = '#64748b';
+    ctx.font = '10px ui-monospace, monospace';
+    ctx.fillText(item.value.toString(), legX + 10, legY + 20);
+
+    legY += 30;
+  });
 }
 
-function updateCharts(stats) {
-  if (trafficVerdictChart) {
-    const allowed = stats.allowed_logs || 0;
-    const blocked = stats.blocked_logs || 0;
-    trafficVerdictChart.data.datasets[0].data = [allowed, blocked];
-    trafficVerdictChart.update('none');
+function drawUsageBarChart(apps) {
+  const canvas = document.getElementById('canvas-usage');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width;
+  const h = canvas.height;
+
+  ctx.clearRect(0, 0, w, h);
+
+  if (!apps || apps.length === 0) {
+    ctx.fillStyle = '#64748b';
+    ctx.font = '12px ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('NO APP USAGE SYNCED YET', w / 2, h / 2);
+    return;
   }
 
-  if (rulesBreakdownChart) {
-    const domainCount = stats.rules_by_type?.domain || 0;
-    const ipCount = stats.rules_by_type?.ip || 0;
-    const appCount = stats.rules_by_type?.app || 0;
-    rulesBreakdownChart.data.datasets[0].data = [domainCount, ipCount, appCount];
-    rulesBreakdownChart.update('none');
-  }
+  // Take top 5
+  const topList = apps.slice(0, 5);
+  const maxMins = Math.max(90, ...topList.map(a => Math.max(a.last_usage_minutes || 0, a.daily_limit_minutes || 0)));
+
+  const startX = 110;
+  const barMaxWidth = w - startX - 85;
+  const startY = 22;
+  const rowHeight = 36;
+
+  topList.forEach((app, i) => {
+    const y = startY + i * rowHeight;
+    const used = app.last_usage_minutes || 0;
+    const limit = app.daily_limit_minutes || 0;
+    const barWidth = Math.max(4, (used / maxMins) * barMaxWidth);
+
+    // Label App Name
+    ctx.fillStyle = '#e2e8f0';
+    ctx.font = '11px ui-sans-serif, sans-serif';
+    ctx.textAlign = 'right';
+    const cleanName = (app.app_name || app.package_name).length > 13
+      ? (app.app_name || app.package_name).substring(0, 12) + '…'
+      : (app.app_name || app.package_name);
+    ctx.fillText(cleanName, startX - 10, y + 14);
+
+    // Background track
+    ctx.fillStyle = '#1e293b';
+    ctx.beginPath();
+    ctx.roundRect(startX, y + 3, barMaxWidth, 16, 4);
+    ctx.fill();
+
+    // Usage Fill (Rose if over limit, else Cyan)
+    const isOver = limit > 0 && used >= limit;
+    ctx.fillStyle = isOver ? '#f43f5e' : (used > 40 ? '#06b6d4' : '#38bdf8');
+    ctx.beginPath();
+    ctx.roundRect(startX, y + 3, Math.min(barWidth, barMaxWidth), 16, 4);
+    ctx.fill();
+
+    // Limit marker line if applicable
+    if (limit > 0) {
+      const markX = startX + (limit / maxMins) * barMaxWidth;
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(markX, y);
+      ctx.lineTo(markX, y + 22);
+      ctx.stroke();
+    }
+
+    // Number text
+    ctx.fillStyle = isOver ? '#fb7185' : '#94a3b8';
+    ctx.font = '10px ui-monospace, monospace';
+    ctx.textAlign = 'left';
+    const textLabel = limit > 0 ? `${used}m / ${limit}m` : `${used}m`;
+    ctx.fillText(textLabel, startX + barMaxWidth + 8, y + 15);
+  });
 }
 
 // ============================================================================
-// DATA POLLING & SYNCHRONIZATION
+// DATA FETCHING & SYNCHRONIZATION
 // ============================================================================
 
 async function checkDatabaseHealth() {
@@ -246,72 +274,91 @@ async function checkDatabaseHealth() {
     const text = document.getElementById('db-health-text');
 
     if (res.ok && data.status === 'ok') {
-      state.dbConnected = true;
-      if (pill) {
-        pill.className = 'flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-mono font-medium border bg-emerald-950/60 border-emerald-500/50 text-emerald-400 ml-2';
-      }
-      if (dot) {
-        dot.className = 'w-2 h-2 rounded-full bg-emerald-400 pulse-indicator';
-      }
-      if (text) text.textContent = 'DB: CONNECTED';
+      if (pill) pill.className = 'pill pill-emerald';
+      if (dot) dot.style.backgroundColor = '#10b981';
+      if (text) text.textContent = 'DB: LIVE';
     } else {
-      state.dbConnected = false;
-      if (pill) {
-        pill.className = 'flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-mono font-medium border bg-rose-950/60 border-rose-500/50 text-rose-400 ml-2';
-      }
-      if (dot) {
-        dot.className = 'w-2 h-2 rounded-full bg-rose-500 pulse-indicator';
-      }
+      if (pill) pill.className = 'pill pill-rose';
+      if (dot) dot.style.backgroundColor = '#f43f5e';
       if (text) text.textContent = 'DB: ERROR';
     }
   } catch (err) {
-    state.dbConnected = false;
     const pill = document.getElementById('db-health-pill');
     const dot = document.getElementById('db-health-dot');
     const text = document.getElementById('db-health-text');
-    if (pill) {
-      pill.className = 'flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-mono font-medium border bg-rose-950/60 border-rose-500/50 text-rose-400 ml-2';
-    }
-    if (dot) dot.className = 'w-2 h-2 rounded-full bg-rose-500 pulse-indicator';
-    if (text) text.textContent = 'DB: DISCONNECTED';
+    if (pill) pill.className = 'pill pill-rose';
+    if (dot) dot.style.backgroundColor = '#f43f5e';
+    if (text) text.textContent = 'DB: DOWN';
   }
 }
 
-async function fetchDashboardData() {
-  if (state.isFetching) return;
+async function fetchDevicesList() {
+  try {
+    const res = await fetch('/api/devices');
+    if (!res.ok) throw new Error('Failed to load devices');
+    state.devices = await res.json();
+
+    const selector = document.getElementById('device-selector');
+    if (!selector) return;
+
+    selector.innerHTML = '';
+    state.devices.forEach(d => {
+      const opt = document.createElement('option');
+      opt.value = d.id;
+      opt.textContent = `${d.device_name} (${d.is_paired ? 'Paired' : 'Unpaired'})`;
+      selector.appendChild(opt);
+    });
+
+    if (state.devices.length > 0) {
+      if (!state.currentDeviceId || !state.devices.some(d => d.id === state.currentDeviceId)) {
+        state.currentDeviceId = state.devices[0].id;
+      }
+      selector.value = state.currentDeviceId;
+    }
+  } catch (err) {
+    console.error('Fetch devices error:', err);
+  }
+}
+
+async function fetchDeviceData() {
+  if (!state.currentDeviceId || state.isFetching) return;
   state.isFetching = true;
 
   try {
-    const res = await fetch('/api/dashboard');
-    if (!res.ok) {
-      throw new Error(`Server returned ${res.status}`);
+    // 1. Fetch Consolidated Telemetry
+    const resTelem = await fetch(`/api/devices/${state.currentDeviceId}/telemetry`);
+    if (resTelem.ok) {
+      const telem = await resTelem.json();
+      state.deviceData = telem.device;
+      state.stats = telem.stats;
+      state.pendingWaivers = telem.pending_waivers || [];
+      state.activeWaivers = telem.active_waivers || [];
+      state.logs = telem.logs || [];
+
+      renderDeviceCard(state.deviceData);
+      renderKPIs(state.stats, state.deviceData);
+      renderWaiversInbox(state.pendingWaivers, state.activeWaivers);
+      drawVerdictDoughnut(state.stats.allowed_logs || 0, state.stats.blocked_logs || 0, state.stats.waived_logs || 0);
+      drawUsageBarChart(telem.top_apps || []);
+      renderLogsTable(state.logs);
     }
-    const data = await res.json();
 
-    // Check for newly detected blocked connection from polling
-    if (data.logs && data.logs.length > 0) {
-      const topBlocked = data.logs.find(l => l.status === 'BLOCKED');
-      if (topBlocked) {
-        if (state.lastBlockedLogId !== null && topBlocked.id > state.lastBlockedLogId) {
-          triggerBlockedAlert();
-        }
-        state.lastBlockedLogId = topBlocked.id;
-      }
+    // 2. Fetch Installed Apps & Policies
+    const resApps = await fetch(`/api/devices/${state.currentDeviceId}/apps`);
+    if (resApps.ok) {
+      state.apps = await resApps.json();
+      renderAppsTable();
     }
 
-    state.rules = data.rules || [];
-    state.logs = data.logs || [];
-    state.stats = data.stats || {};
-    state.settings = data.settings || state.settings;
+    // 3. Fetch Network Rules
+    const resRules = await fetch(`/api/devices/${state.currentDeviceId}/network-rules`);
+    if (resRules.ok) {
+      state.networkRules = await resRules.json();
+      renderNetworkRulesTable();
+    }
 
-    renderKPIs(state.stats, state.settings);
-    renderSettings(state.settings);
-    updateCharts(state.stats);
-    renderRules();
-    renderLogs();
-    updateTabCounts();
   } catch (err) {
-    console.warn('Dashboard poll error:', err);
+    console.error('Dashboard telemetry poll error:', err);
   } finally {
     state.isFetching = false;
   }
@@ -321,274 +368,383 @@ async function fetchDashboardData() {
 // RENDERING FUNCTIONS
 // ============================================================================
 
-function renderKPIs(stats, settings) {
-  const elTotal = document.getElementById('stat-total-logs');
-  const elAllowed = document.getElementById('stat-allowed-logs');
-  const elBlocked = document.getElementById('stat-blocked-logs');
-  const elBlockRate = document.getElementById('stat-block-rate');
-  const elActiveRules = document.getElementById('stat-active-rules');
-  const elTotalRules = document.getElementById('stat-total-rules');
-  const elRulesBreakdown = document.getElementById('stat-rules-types-sub');
+function renderDeviceCard(dev) {
+  if (!dev) return;
 
-  if (elTotal) elTotal.textContent = stats.total_logs ?? 0;
-  if (elAllowed) elAllowed.textContent = stats.allowed_logs ?? 0;
-  if (elBlocked) elBlocked.textContent = stats.blocked_logs ?? 0;
-  if (elBlockRate) elBlockRate.textContent = `${stats.block_rate_percent ?? 0}% Rate`;
-  if (elActiveRules) elActiveRules.textContent = stats.active_rules_count ?? 0;
-  if (elTotalRules) elTotalRules.textContent = stats.total_rules_count ?? 0;
+  const nameEl = document.getElementById('card-device-name');
+  const modelEl = document.getElementById('card-device-model');
+  const keyEl = document.getElementById('card-pairing-key');
+  const pairedEl = document.getElementById('card-paired-status');
+  const lastSeenEl = document.getElementById('card-last-seen');
 
-  if (elRulesBreakdown && stats.rules_by_type) {
-    const d = stats.rules_by_type.domain ?? 0;
-    const ip = stats.rules_by_type.ip ?? 0;
-    const a = stats.rules_by_type.app ?? 0;
-    elRulesBreakdown.textContent = `${d}D · ${ip}IP · ${a}A`;
+  if (nameEl) nameEl.textContent = dev.device_name;
+  if (modelEl) modelEl.textContent = `Model: ${dev.device_model || 'Pending initial handshake'}`;
+  if (keyEl) keyEl.textContent = dev.pairing_key;
+
+  if (pairedEl) {
+    if (dev.is_paired) {
+      pairedEl.className = 'pill pill-emerald';
+      pairedEl.textContent = 'PAIRED & ONLINE';
+    } else {
+      pairedEl.className = 'pill pill-amber';
+      pairedEl.textContent = 'AWAITING APP PAIRING';
+    }
   }
-}
 
-function renderSettings(settings) {
-  const isGuided = !!settings.guided_mode;
-  const devName = settings.device_name || 'Android Handover Device';
+  if (lastSeenEl) {
+    lastSeenEl.textContent = dev.last_seen_at ? `Last Synced: ${formatIsoTime(dev.last_seen_at)} UTC` : 'Last Synced: Never';
+  }
 
-  // Device Name indicators
-  const navDev = document.getElementById('nav-device-name');
-  const statDev = document.getElementById('stat-device-name');
-  if (navDev) navDev.textContent = devName;
-  if (statDev) statDev.textContent = devName;
-
-  // Guided Mode Badges & Buttons
-  const badge = document.getElementById('guided-mode-badge');
-  const text = document.getElementById('guided-mode-text');
-  const icon = document.getElementById('guided-mode-icon');
-  const lockBtn = document.getElementById('btn-toggle-lock');
-  const lockBtnText = document.getElementById('lock-btn-text');
-
-  const cardStatusTitle = document.getElementById('handover-status-title');
-  const cardPill = document.getElementById('handover-pill');
-  const cardIcon = document.getElementById('handover-status-icon');
-
-  if (isGuided) {
-    if (badge) {
-      badge.className = 'flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all bg-emerald-950/80 text-emerald-400 border-emerald-500/50 shadow-sm shadow-emerald-500/20';
+  // Guided Mode Toggle Button
+  const guidedBadge = document.getElementById('guided-mode-badge');
+  const btnGuided = document.getElementById('btn-toggle-guided');
+  if (dev.guided_mode) {
+    if (guidedBadge) {
+      guidedBadge.className = 'pill pill-emerald';
+      guidedBadge.textContent = 'GUIDED MODE: LOCKED';
     }
-    if (text) text.textContent = 'GUIDED MODE: LOCKED';
-    if (icon) {
-      icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>';
-    }
-    if (lockBtn) {
-      lockBtn.className = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white shadow-sm shadow-rose-600/30 transition flex items-center space-x-1';
-    }
-    if (lockBtnText) lockBtnText.textContent = 'Unlock Handover';
-
-    if (cardStatusTitle) {
-      cardStatusTitle.textContent = 'Protected';
-      cardStatusTitle.className = 'text-2xl font-bold font-mono tracking-tight text-emerald-400';
-    }
-    if (cardPill) {
-      cardPill.textContent = 'LOCKED';
-      cardPill.className = 'text-xs px-2 py-0.5 rounded-full font-mono font-bold bg-emerald-950 border border-emerald-500/60 text-emerald-400';
-    }
-    if (cardIcon) {
-      cardIcon.className = 'w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400';
+    if (btnGuided) {
+      btnGuided.className = 'btn btn-rose btn-sm';
+      btnGuided.textContent = 'Unlock Handover';
     }
   } else {
-    if (badge) {
-      badge.className = 'flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all bg-slate-800/80 text-slate-400 border-slate-700';
+    if (guidedBadge) {
+      guidedBadge.className = 'pill pill-slate';
+      guidedBadge.textContent = 'GUIDED MODE: OFF';
     }
-    if (text) text.textContent = 'GUIDED MODE: OFF';
-    if (icon) {
-      icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"/>';
+    if (btnGuided) {
+      btnGuided.className = 'btn btn-cyan btn-sm';
+      btnGuided.textContent = 'Lock Handover';
     }
-    if (lockBtn) {
-      lockBtn.className = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-cyan-600 hover:bg-cyan-500 text-white shadow-sm shadow-cyan-600/30 transition flex items-center space-x-1';
-    }
-    if (lockBtnText) lockBtnText.textContent = 'Lock Handover';
+  }
 
-    if (cardStatusTitle) {
-      cardStatusTitle.textContent = 'Standby';
-      cardStatusTitle.className = 'text-2xl font-bold font-mono tracking-tight text-slate-300';
+  // Uninstall Lock Widget
+  const uninstPill = document.getElementById('uninstall-pill');
+  const btnUninst = document.getElementById('btn-uninstall-action');
+
+  if (dev.uninstall_allowed) {
+    if (uninstPill) {
+      uninstPill.className = 'pill pill-amber';
+      uninstPill.textContent = `UNINSTALL UNLOCKED (${formatSeconds(dev.uninstall_remaining_seconds)})`;
     }
-    if (cardPill) {
-      cardPill.textContent = 'UNLOCKED';
-      cardPill.className = 'text-xs px-2 py-0.5 rounded-full font-mono font-medium bg-slate-800 border border-slate-700 text-slate-400';
+    if (btnUninst) {
+      btnUninst.className = 'btn btn-rose btn-sm';
+      btnUninst.textContent = 'Revoke Now';
     }
-    if (cardIcon) {
-      cardIcon.className = 'w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-400';
+  } else {
+    if (uninstPill) {
+      uninstPill.className = 'pill pill-rose';
+      uninstPill.textContent = 'UNINSTALL: PROTECTED';
+    }
+    if (btnUninst) {
+      btnUninst.className = 'btn btn-dark btn-sm';
+      btnUninst.textContent = 'Unlock (10m)';
     }
   }
 }
 
-function updateTabCounts() {
-  const counts = {
-    all: state.rules.length,
-    domain: 0,
-    ip: 0,
-    app: 0,
-    timed: 0,
-  };
+function renderKPIs(stats, dev) {
+  if (!stats) return;
 
-  state.rules.forEach(r => {
-    if (r.rule_type in counts) counts[r.rule_type]++;
-    if (r.expires_at) counts.timed++;
-  });
+  const kpiApps = document.getElementById('kpi-apps-count');
+  const kpiPolicies = document.getElementById('kpi-policies-count');
+  const kpiBlocked = document.getElementById('kpi-blocked-count');
+  const kpiTotalLogs = document.getElementById('kpi-total-logs-count');
+  const kpiWaivers = document.getElementById('kpi-waivers-count');
+  const kpiPending = document.getElementById('kpi-pending-waivers');
+  const kpiUninst = document.getElementById('kpi-uninstall-status');
 
-  const elAll = document.getElementById('tab-count-all');
-  const elDom = document.getElementById('tab-count-domain');
-  const elIp = document.getElementById('tab-count-ip');
-  const elApp = document.getElementById('tab-count-app');
-  const elTimed = document.getElementById('tab-count-timed');
+  if (kpiApps) kpiApps.textContent = state.apps.length;
+  if (kpiPolicies) kpiPolicies.textContent = state.apps.filter(a => a.has_policy && a.is_active).length;
+  if (kpiBlocked) kpiBlocked.textContent = stats.blocked_logs || 0;
+  if (kpiTotalLogs) kpiTotalLogs.textContent = stats.total_logs || 0;
+  if (kpiWaivers) kpiWaivers.textContent = stats.active_waivers_count || 0;
+  if (kpiPending) kpiPending.textContent = stats.pending_waivers_count || 0;
 
-  if (elAll) elAll.textContent = counts.all;
-  if (elDom) elDom.textContent = counts.domain;
-  if (elIp) elIp.textContent = counts.ip;
-  if (elApp) elApp.textContent = counts.app;
-  if (elTimed) elTimed.textContent = counts.timed;
+  if (kpiUninst) {
+    kpiUninst.textContent = dev && dev.uninstall_allowed ? 'UNLOCKED' : 'LOCKED';
+    kpiUninst.style.color = dev && dev.uninstall_allowed ? '#f59e0b' : '#fb7185';
+  }
 }
 
-function renderRules() {
-  const container = document.getElementById('rules-list-container');
-  if (!container) return;
+function renderWaiversInbox(pending, active) {
+  const inboxSection = document.getElementById('waiver-inbox-section');
+  const countBadge = document.getElementById('pending-waiver-count');
+  const cardsContainer = document.getElementById('pending-waiver-cards');
 
-  const tab = state.activeRuleTab;
-  const q = state.ruleSearchQuery.toLowerCase();
+  if (pending && pending.length > 0) {
+    inboxSection.style.display = 'block';
+    countBadge.textContent = `${pending.length} PENDING`;
 
-  const filtered = state.rules.filter(r => {
-    if (tab === 'timed' && !r.expires_at) return false;
-    if (tab !== 'all' && tab !== 'timed' && r.rule_type !== tab) return false;
+    let html = '';
+    pending.forEach(w => {
+      html += `
+        <div class="flex items-center justify-between flex-wrap gap-2 p-2" style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 8px;">
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="pill pill-amber">${escapeHtml(w.target_type.toUpperCase())}</span>
+              <strong style="color: #fff; font-size: 0.85rem;">${escapeHtml(w.display_name)}</strong>
+              <span style="font-size: 0.75rem; color: #94a3b8; font-family: var(--font-mono);">${escapeHtml(w.target)}</span>
+            </div>
+            <div style="font-size: 0.75rem; color: #fef08a; margin-top: 0.15rem;">
+              Reason: "${escapeHtml(w.reason)}" · Requested Duration: ${w.duration_minutes}m
+            </div>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <button type="button" class="btn btn-emerald btn-sm" onclick="handleWaiverAction(${w.id}, 'APPROVE', 10)">Approve 10m</button>
+            <button type="button" class="btn btn-cyan btn-sm" onclick="handleWaiverAction(${w.id}, 'APPROVE', 5)">5m</button>
+            <button type="button" class="btn btn-purple btn-sm" onclick="handleWaiverAction(${w.id}, 'APPROVE', 15)">15m</button>
+            <button type="button" class="btn btn-rose btn-sm" onclick="handleWaiverAction(${w.id}, 'DENY')">Deny</button>
+          </div>
+        </div>
+      `;
+    });
+    cardsContainer.innerHTML = html;
+  } else {
+    inboxSection.style.display = 'none';
+  }
+
+  // Active Waivers Row
+  const activeRow = document.getElementById('active-waivers-row');
+  const activePillsContainer = document.getElementById('active-waiver-pills');
+
+  if (active && active.length > 0) {
+    activeRow.style.display = 'block';
+    let pillsHtml = '';
+    active.forEach(w => {
+      pillsHtml += `
+        <div class="flex items-center gap-2" style="background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(16, 185, 129, 0.5); padding: 0.2rem 0.5rem; border-radius: 6px; font-size: 0.75rem;">
+          <strong style="color: #fff;">${escapeHtml(w.display_name)}</strong>
+          <span class="pill pill-emerald waiver-countdown-pill" data-waiver-id="${w.id}">${formatSeconds(w.remaining_seconds)}</span>
+          <button type="button" class="btn btn-rose btn-sm" style="padding: 0.1rem 0.35rem; font-size: 0.68rem;" onclick="revokeWaiver(${w.id})">Revoke</button>
+        </div>
+      `;
+    });
+    activePillsContainer.innerHTML = pillsHtml;
+  } else {
+    activeRow.style.display = 'none';
+  }
+}
+
+function renderAppsTable() {
+  const tbody = document.getElementById('apps-table-body');
+  if (!tbody) return;
+
+  const filter = state.appFilterTab;
+  const q = state.appSearchQuery.toLowerCase();
+
+  const filtered = state.apps.filter(app => {
+    // Mode filter
+    const mode = app.policy_mode || 'ALLOW';
+    const isRestricted = app.has_policy && app.is_active && mode !== 'ALLOW';
+
+    if (filter === 'restricted' && !isRestricted) return false;
+    if (filter === 'scheduled' && mode !== 'SCHEDULE') return false;
+    if (filter === 'unrestricted' && isRestricted) return false;
+
+    // Search query
     if (q) {
-      const matchTarget = r.target.toLowerCase().includes(q);
-      const matchNote = (r.note || '').toLowerCase().includes(q);
-      if (!matchTarget && !matchNote) return false;
+      const matchName = (app.app_name || '').toLowerCase().includes(q);
+      const matchPkg = (app.package_name || '').toLowerCase().includes(q);
+      if (!matchName && !matchPkg) return false;
     }
     return true;
   });
 
+  // Update counts
+  const totalEl = document.getElementById('apps-total-badge');
+  const countAll = document.getElementById('count-all-apps');
+  const countRestricted = document.getElementById('count-restricted-apps');
+  const countScheduled = document.getElementById('count-scheduled-apps');
+  const countUnrestricted = document.getElementById('count-unrestricted-apps');
+
+  if (totalEl) totalEl.textContent = `${state.apps.length} APPS`;
+  if (countAll) countAll.textContent = state.apps.length;
+  if (countRestricted) countRestricted.textContent = state.apps.filter(a => a.has_policy && a.is_active && a.policy_mode !== 'ALLOW').length;
+  if (countScheduled) countScheduled.textContent = state.apps.filter(a => a.policy_mode === 'SCHEDULE').length;
+  if (countUnrestricted) countUnrestricted.textContent = state.apps.filter(a => !a.has_policy || !a.is_active || a.policy_mode === 'ALLOW').length;
+
   if (filtered.length === 0) {
-    container.innerHTML = `
-      <div class="py-12 text-center text-slate-500 text-xs font-mono">
-        No active rules found matching current criteria.
-      </div>
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" style="text-align: center; color: var(--text-dim); padding: 2rem 0;">
+          No apps match the current filter or search criteria.
+        </td>
+      </tr>
     `;
+    return;
+  }
+
+  let html = '';
+  filtered.forEach(app => {
+    const pkg = escapeHtml(app.package_name);
+    const name = escapeHtml(app.app_name || app.package_name);
+    const mode = app.policy_mode || 'ALLOW';
+    const used = app.last_usage_minutes || 0;
+    const limit = app.daily_limit_minutes || 0;
+
+    // Badge for Policy Mode
+    let modeBadge = '<span class="pill pill-slate">ALLOW</span>';
+    if (app.has_policy && app.is_active) {
+      if (mode === 'BLOCK') modeBadge = '<span class="pill pill-rose">FULL BLOCK</span>';
+      else if (mode === 'SCHEDULE') modeBadge = '<span class="pill pill-purple">SCHEDULED</span>';
+      else if (mode === 'DAILY_LIMIT') modeBadge = '<span class="pill pill-cyan">DAILY QUOTA</span>';
+    }
+
+    // Schedule / Quota details
+    let detailText = '<span style="color: var(--text-dim);">None</span>';
+    if (app.has_policy && app.is_active) {
+      if (mode === 'SCHEDULE') {
+        detailText = `<span class="font-mono text-purple" style="color: #c084fc;">${escapeHtml(app.schedule_start)} – ${escapeHtml(app.schedule_end)}</span>`;
+      } else if (mode === 'DAILY_LIMIT') {
+        const isExceeded = limit > 0 && used >= limit;
+        detailText = `<span class="font-mono" style="color: ${isExceeded ? '#fb7185' : '#38bdf8'}; font-weight: bold;">${used}m / ${limit}m limit</span>`;
+      } else if (mode === 'BLOCK') {
+        detailText = `<span style="color: #fb7185; font-size: 0.75rem;">Restricted 24/7</span>`;
+      }
+    }
+
+    // Active Toggle Switch
+    const checked = (app.has_policy && app.is_active) ? 'checked' : '';
+
+    // Quick Waiver Button if currently restricted
+    let waiverBtn = '';
+    if (app.has_policy && app.is_active && mode !== 'ALLOW') {
+      if (app.has_active_waiver) {
+        waiverBtn = `<span class="pill pill-emerald" style="font-size: 0.68rem;">Waived (${formatSeconds(app.waiver_remaining_seconds)})</span>`;
+      } else {
+        waiverBtn = `<button type="button" class="btn btn-amber btn-sm" style="font-size: 0.7rem; padding: 0.2rem 0.45rem;" onclick="grantQuickAppWaiver('${pkg}', '${name}')">10m Waiver</button>`;
+      }
+    }
+
+    html += `
+      <tr>
+        <td>
+          <div style="font-weight: 700; color: #fff;">${name}</div>
+          <div style="font-size: 0.72rem; color: var(--text-dim); font-family: var(--font-mono);">${pkg}</div>
+        </td>
+        <td>
+          <span class="font-mono" style="color: ${used > 30 ? '#38bdf8' : 'var(--text-muted)'}; font-weight: 600;">${used} mins</span>
+        </td>
+        <td>${modeBadge}</td>
+        <td>${detailText}</td>
+        <td>
+          <label class="switch">
+            <input type="checkbox" ${checked} onchange="toggleAppPolicy('${pkg}', this.checked)">
+            <span class="slider"></span>
+          </label>
+        </td>
+        <td style="text-align: right;">
+          <div class="flex items-center justify-center gap-1.5" style="justify-content: flex-end;">
+            ${waiverBtn}
+            <button type="button" class="btn btn-dark btn-sm" onclick="openConfigurePolicyModal('${pkg}', '${name}', '${mode}', '${app.schedule_start || ''}', '${app.schedule_end || ''}', ${limit || 60}, ${app.is_active ? 'true' : 'false'})">
+              Configure
+            </button>
+          </div>
+        </td>
+      </tr>
+    `;
+  });
+
+  tbody.innerHTML = html;
+}
+
+function renderNetworkRulesTable() {
+  const tbody = document.getElementById('rules-table-body');
+  const countBadge = document.getElementById('rules-count-badge');
+  if (!tbody) return;
+
+  const tab = state.ruleFilterTab;
+  const filtered = state.networkRules.filter(r => {
+    if (tab === 'timed' && !r.expires_at) return false;
+    if (tab !== 'all' && tab !== 'timed' && r.rule_type !== tab) return false;
+    return true;
+  });
+
+  if (countBadge) countBadge.textContent = `${state.networkRules.length} RULES`;
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-dim); padding: 1.5rem 0;">No matching network rules.</td></tr>`;
     return;
   }
 
   let html = '';
   filtered.forEach(r => {
     const isBlock = r.action === 'BLOCK';
-    const actionBadge = isBlock
-      ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-rose-950/80 text-rose-400 border border-rose-800/60">BLOCK</span>'
-      : '<span class="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-emerald-950/80 text-emerald-400 border border-emerald-800/60">ALLOW</span>';
+    const actionBadge = isBlock ? '<span class="pill pill-rose">BLOCK</span>' : '<span class="pill pill-emerald">ALLOW</span>';
+    const typeBadge = `<span class="pill pill-slate">${escapeHtml(r.rule_type.toUpperCase())}</span>`;
 
-    const typeBadge = `<span class="px-1.5 py-0.5 rounded text-[10px] font-mono uppercase bg-slate-800 text-slate-400 border border-slate-700">${escapeHtml(r.rule_type)}</span>`;
-
-    let countdownBadge = '';
+    let expiryDesc = escapeHtml(r.note || 'Permanent');
     if (r.expires_at) {
-      const sec = r.remaining_seconds ?? 0;
-      countdownBadge = `
-        <span class="rule-countdown-pill flex items-center space-x-1 text-[10px] font-mono px-2 py-0.5 rounded bg-amber-950/60 border border-amber-600/40 text-amber-300" data-rule-id="${r.id}">
-          <svg class="w-3 h-3 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-          <span class="countdown-text">${formatCountdown(sec)}</span>
-        </span>
-      `;
+      expiryDesc = `<span class="pill pill-amber" style="font-size: 0.7rem;">${formatSeconds(r.remaining_seconds)}</span>`;
     }
 
-    const checkedAttr = r.is_active ? 'checked' : '';
+    const checked = r.is_active ? 'checked' : '';
 
     html += `
-      <div class="cyber-card p-3 rounded-lg border border-slate-800 hover:border-slate-700 transition flex items-center justify-between gap-3">
-        <div class="flex items-center space-x-2.5 min-w-0">
-          <div class="flex-shrink-0">${actionBadge}</div>
-          <div class="flex-shrink-0">${typeBadge}</div>
-          <div class="min-w-0">
-            <div class="text-xs font-mono font-medium text-slate-200 truncate" title="${escapeHtml(r.target)}">
-              ${escapeHtml(r.target)}
-            </div>
-            ${
-              r.note
-                ? `<div class="text-[11px] text-slate-400 truncate max-w-xs sm:max-w-md">${escapeHtml(r.note)}</div>`
-                : ''
-            }
-          </div>
-        </div>
-
-        <div class="flex items-center space-x-3 flex-shrink-0">
-          ${countdownBadge}
-          
-          <!-- Toggle Switch -->
-          <label class="relative inline-flex items-center cursor-pointer" title="Toggle active/pause">
-            <input type="checkbox" class="sr-only toggle-rule-checkbox" data-id="${r.id}" ${checkedAttr}>
-            <div class="w-8 h-4 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 peer-checked:after:bg-white after:border-slate-600 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-emerald-600"></div>
+      <tr>
+        <td>${typeBadge}</td>
+        <td style="font-family: var(--font-mono); font-weight: 600; color: #fff;">${escapeHtml(r.target)}</td>
+        <td>${actionBadge}</td>
+        <td>${expiryDesc}</td>
+        <td>
+          <label class="switch">
+            <input type="checkbox" ${checked} onchange="toggleNetworkRule(${r.id})">
+            <span class="slider"></span>
           </label>
-
-          <!-- Delete Rule Button -->
-          <button class="btn-delete-rule text-slate-500 hover:text-rose-400 p-1 rounded hover:bg-rose-950/40 transition" data-id="${r.id}" title="Delete rule">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-            </svg>
-          </button>
-        </div>
-      </div>
+        </td>
+        <td style="text-align: right;">
+          <button type="button" class="btn btn-rose btn-sm" onclick="deleteNetworkRule(${r.id})">Delete</button>
+        </td>
+      </tr>
     `;
   });
 
-  container.innerHTML = html;
+  tbody.innerHTML = html;
 }
 
-function renderLogs() {
-  const container = document.getElementById('logs-container');
+function renderLogsTable(logs) {
+  const container = document.getElementById('logs-feed-container');
+  const countBadge = document.getElementById('logs-count-badge');
   if (!container) return;
 
-  const filter = state.activeLogFilter;
+  const filter = state.logFilterStatus;
   const q = state.logSearchQuery.toLowerCase();
 
-  const filtered = state.logs.filter(l => {
+  const filtered = logs.filter(l => {
     if (filter !== 'ALL' && l.status !== filter) return false;
     if (q) {
-      const matchTarget = l.target.toLowerCase().includes(q);
+      const matchTarget = (l.target || '').toLowerCase().includes(q);
       const matchReason = (l.reason || '').toLowerCase().includes(q);
-      const matchDev = (l.device_name || '').toLowerCase().includes(q);
-      if (!matchTarget && !matchReason && !matchDev) return false;
+      if (!matchTarget && !matchReason) return false;
     }
     return true;
   });
 
+  if (countBadge) countBadge.textContent = `${logs.length} LOGS`;
+
   if (filtered.length === 0) {
-    container.innerHTML = `
-      <div class="py-12 text-center text-slate-500 text-xs">
-        No network logs found.
-      </div>
-    `;
+    container.innerHTML = `<div style="text-align: center; color: var(--text-dim); padding: 1.5rem 0; font-size: 0.8rem;">No telemetry matching criteria.</div>`;
     return;
   }
 
   let html = '';
   filtered.forEach(l => {
     const isBlock = l.status === 'BLOCKED';
-    const statusClass = isBlock ? 'text-rose-400 font-bold' : 'text-emerald-400 font-bold';
-    const rowBorder = isBlock ? 'border-rose-950/40 hover:border-rose-800/40' : 'border-slate-800 hover:border-slate-700';
-
-    const sourceBadge =
-      l.source === 'ANDROID_VPN'
-        ? '<span class="text-[9px] px-1.5 py-0.2 rounded bg-indigo-950 text-indigo-300 border border-indigo-800/60 font-mono">VPN</span>'
-        : '<span class="text-[9px] px-1.5 py-0.2 rounded bg-purple-950 text-purple-300 border border-purple-800/60 font-mono">SIM</span>';
-
-    const typeBadge = `<span class="text-[9px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 uppercase font-mono">${escapeHtml(l.rule_type)}</span>`;
+    const isWaived = l.status === 'WAIVED';
+    const pillClass = isBlock ? 'pill-rose' : (isWaived ? 'pill-amber' : 'pill-emerald');
 
     html += `
-      <div class="p-2.5 rounded-lg border ${rowBorder} bg-cyber-900/40 text-xs transition space-y-1">
-        <div class="flex items-center justify-between text-[11px]">
-          <div class="flex items-center space-x-1.5">
-            <span class="text-slate-500">${formatIsoTime(l.created_at)}</span>
-            ${sourceBadge}
-            ${typeBadge}
+      <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid ${isBlock ? 'rgba(244, 63, 94, 0.3)' : 'rgba(51, 65, 85, 0.5)'}; border-radius: 6px; padding: 0.4rem 0.6rem; font-size: 0.75rem;">
+        <div class="flex items-center justify-between mb-0.5">
+          <div class="flex items-center gap-1.5">
+            <span style="color: var(--text-dim); font-family: var(--font-mono); font-size: 0.7rem;">${formatIsoTime(l.created_at)}</span>
+            <span class="pill pill-slate" style="font-size: 0.68rem; padding: 0.1rem 0.4rem;">${escapeHtml(l.event_type.toUpperCase())}</span>
+            <strong style="color: #fff; font-family: var(--font-mono);">${escapeHtml(l.target)}</strong>
           </div>
-          <span class="${statusClass}">${escapeHtml(l.status)}</span>
+          <span class="pill ${pillClass}" style="font-size: 0.68rem;">${escapeHtml(l.status)}</span>
         </div>
-        <div class="text-slate-200 font-mono font-medium break-all">
-          ${escapeHtml(l.target)}
-        </div>
-        <div class="text-[11px] text-slate-400 truncate">
-          ${escapeHtml(l.reason)}
-        </div>
+        <div style="color: var(--text-muted); font-size: 0.72rem;">${escapeHtml(l.reason)}</div>
       </div>
     `;
   });
@@ -602,552 +758,212 @@ function renderLogs() {
 
 function startCountdownTicker() {
   setInterval(() => {
-    let expiredDetected = false;
+    let shouldSync = false;
 
-    state.rules.forEach(r => {
-      if (r.remaining_seconds !== null && r.remaining_seconds !== undefined) {
-        r.remaining_seconds = Math.max(0, r.remaining_seconds - 1);
-        if (r.remaining_seconds === 0) {
-          expiredDetected = true;
+    // 1. Decrement active emergency waivers
+    if (state.activeWaivers && state.activeWaivers.length > 0) {
+      state.activeWaivers.forEach(w => {
+        if (w.remaining_seconds > 0) {
+          w.remaining_seconds -= 1;
+          if (w.remaining_seconds === 0) shouldSync = true;
         }
-      }
-    });
+      });
+      // Update DOM pills
+      document.querySelectorAll('.waiver-countdown-pill').forEach(pill => {
+        const id = parseInt(pill.getAttribute('data-waiver-id'), 10);
+        const w = state.activeWaivers.find(x => x.id === id);
+        if (w) pill.textContent = formatSeconds(w.remaining_seconds);
+      });
+    }
 
-    // Update pills in DOM
-    const countdownPills = document.querySelectorAll('.rule-countdown-pill');
-    countdownPills.forEach(pill => {
-      const id = parseInt(pill.getAttribute('data-rule-id'), 10);
-      const rule = state.rules.find(r => r.id === id);
-      if (rule && rule.remaining_seconds !== null) {
-        const span = pill.querySelector('.countdown-text');
-        if (span) {
-          span.textContent = formatCountdown(rule.remaining_seconds);
+    // 2. Decrement temporary network rules
+    if (state.networkRules && state.networkRules.length > 0) {
+      state.networkRules.forEach(r => {
+        if (r.remaining_seconds !== null && r.remaining_seconds > 0) {
+          r.remaining_seconds -= 1;
+          if (r.remaining_seconds === 0) shouldSync = true;
         }
-      }
-    });
+      });
+    }
 
-    // If an expired rule hit zero, trigger backend purge & sync
-    if (expiredDetected) {
-      fetchDashboardData();
+    // 3. Decrement uninstall permission window
+    if (state.deviceData && state.deviceData.uninstall_allowed && state.deviceData.uninstall_remaining_seconds > 0) {
+      state.deviceData.uninstall_remaining_seconds -= 1;
+      const uninstPill = document.getElementById('uninstall-pill');
+      if (uninstPill) {
+        uninstPill.textContent = `UNINSTALL UNLOCKED (${formatSeconds(state.deviceData.uninstall_remaining_seconds)})`;
+      }
+      if (state.deviceData.uninstall_remaining_seconds === 0) {
+        shouldSync = true;
+      }
+    }
+
+    if (shouldSync) {
+      fetchDeviceData();
     }
   }, 1000);
 }
 
 // ============================================================================
-// EVENT HANDLERS & MODAL MANAGEMENT
+// USER ACTIONS & MODAL HANDLERS
 // ============================================================================
 
-function setupEventListeners() {
-  // 1. Dynamic Rule Type Placeholder & Hint
-  const typeSelect = document.getElementById('rule-type-select');
-  const targetInput = document.getElementById('rule-target-input');
-  const targetHint = document.getElementById('rule-target-hint');
+function handleDeviceSwitch(devId) {
+  state.currentDeviceId = parseInt(devId, 10);
+  fetchDeviceData();
+}
 
-  if (typeSelect && targetInput && targetHint) {
-    typeSelect.addEventListener('change', () => {
-      const val = typeSelect.value;
-      if (val === 'domain') {
-        targetInput.placeholder = 'e.g. instagram.com or reels.instagram.com';
-        targetHint.innerHTML = 'Domains match exact & subdomains. URLs like <code class="text-cyan-400">https://m.instagram.com/reels</code> are automatically normalized.';
-      } else if (val === 'ip') {
-        targetInput.placeholder = 'e.g. 157.240.22.174 or 1.1.1.1';
-        targetHint.innerHTML = 'Valid IPv4 or IPv6 network address for strict direct packet drop.';
-      } else if (val === 'app') {
-        targetInput.placeholder = 'e.g. com.dts.freefireth or com.instagram.android';
-        targetHint.innerHTML = 'Android application package identifier (reverse-DNS format).';
-      }
+function copyPairingKey() {
+  const key = document.getElementById('card-pairing-key')?.textContent;
+  if (key) {
+    navigator.clipboard.writeText(key).then(() => {
+      showToast(`Pairing Key ${key} copied to clipboard!`, 'success');
+    }).catch(() => {
+      showToast(`Key: ${key}`, 'info');
     });
   }
+}
 
-  // 2. Duration Preset Chips
-  const presetChips = document.querySelectorAll('.preset-chip');
-  const customDurationInput = document.getElementById('rule-duration-custom');
-  const durationDisplay = document.getElementById('duration-display');
+async function regenerateDeviceKey() {
+  if (!confirm('Regenerating this key will disconnect any previously paired phone until the new key is entered. Continue?')) {
+    return;
+  }
+  try {
+    const res = await fetch(`/api/devices/${state.currentDeviceId}/regenerate-key`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to regenerate key');
+    showToast(`New Identity Key generated: ${data.pairing_key}`, 'success');
+    await fetchDevicesList();
+    await fetchDeviceData();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
 
-  presetChips.forEach(chip => {
-    chip.addEventListener('click', () => {
-      presetChips.forEach(c => {
-        c.className = 'preset-chip px-2.5 py-1 text-xs font-mono rounded bg-cyber-850 text-slate-300 border border-slate-700 hover:border-slate-500';
+function promptGuidedModeToggle() {
+  const targetState = !state.deviceData?.guided_mode;
+  state.pinAction = {
+    type: 'guided_mode',
+    targetState: targetState
+  };
+  openPinModal(
+    targetState ? 'Enable Guided Handover Lock' : 'Disable Guided Handover Lock',
+    targetState ? 'Enforce strict network and app control policies on target device.' : 'Temporarily unlock governance rules using Supervisor PIN.'
+  );
+}
+
+function handleUninstallAction() {
+  if (state.deviceData?.uninstall_allowed) {
+    // Revoke
+    fetch(`/api/devices/${state.currentDeviceId}/revoke-uninstall`, { method: 'POST' })
+      .then(res => res.json())
+      .then(() => {
+        showToast('Uninstall protection re-locked immediately', 'info');
+        fetchDeviceData();
       });
-      chip.className = 'preset-chip active px-2.5 py-1 text-xs font-mono rounded bg-cyan-600 text-white border border-cyan-500';
-
-      const mins = chip.getAttribute('data-mins');
-      state.selectedDurationMins = mins;
-      if (customDurationInput) customDurationInput.value = '';
-
-      if (durationDisplay) {
-        durationDisplay.textContent = mins ? `Temporary: ${mins} minute(s)` : 'Permanent Policy';
-      }
-    });
-  });
-
-  if (customDurationInput) {
-    customDurationInput.addEventListener('input', () => {
-      const val = customDurationInput.value.trim();
-      presetChips.forEach(c => {
-        c.className = 'preset-chip px-2.5 py-1 text-xs font-mono rounded bg-cyber-850 text-slate-300 border border-slate-700 hover:border-slate-500';
-      });
-      state.selectedDurationMins = val;
-      if (durationDisplay) {
-        durationDisplay.textContent = val ? `Temporary: ${val} minute(s)` : 'Permanent Policy';
-      }
-    });
+  } else {
+    // Unlock permission (prompt PIN)
+    state.pinAction = { type: 'uninstall_permission' };
+    openPinModal('Grant Uninstall Permission', 'Authorizes the target device to be uninstalled for 10 minutes.');
   }
+}
 
-  // 3. Add Rule Form Submit
-  const formAddRule = document.getElementById('form-add-rule');
-  if (formAddRule) {
-    formAddRule.addEventListener('submit', async e => {
-      e.preventDefault();
-      const ruleType = document.getElementById('rule-type-select').value;
-      const action = document.getElementById('rule-action-select').value;
-      const target = document.getElementById('rule-target-input').value.trim();
-      const note = document.getElementById('rule-note-input').value.trim();
-      const durationMins = state.selectedDurationMins ? parseInt(state.selectedDurationMins, 10) : null;
-
-      try {
-        const res = await fetch('/api/rules', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            rule_type: ruleType,
-            action: action,
-            target: target,
-            note: note,
-            duration_mins: durationMins,
-          }),
-        });
-
-        const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data.error || 'Failed to deploy rule');
-        }
-
-        showToast(`Rule deployed for ${data.target}`, 'success');
-        document.getElementById('rule-target-input').value = '';
-        document.getElementById('rule-note-input').value = '';
-
-        await fetchDashboardData();
-      } catch (err) {
-        showToast(err.message, 'error');
-      }
-    });
-  }
-
-  // 4. Rule Tabs
-  const ruleTabs = document.querySelectorAll('.rule-tab');
-  ruleTabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-      ruleTabs.forEach(t => {
-        t.className = 'rule-tab px-3 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-white hover:bg-cyber-800 border border-transparent';
-      });
-      tab.className = 'rule-tab active px-3 py-1.5 text-xs font-semibold rounded-lg bg-cyber-800 text-white border border-cyan-500/50';
-      state.activeRuleTab = tab.getAttribute('data-tab');
-      renderRules();
-    });
-  });
-
-  // 5. Search Rules Input
-  const searchRulesInput = document.getElementById('search-rules-input');
-  if (searchRulesInput) {
-    searchRulesInput.addEventListener('input', e => {
-      state.ruleSearchQuery = e.target.value.trim();
-      renderRules();
-    });
-  }
-
-  // 6. Rules Container Click Delegation (Toggle & Delete)
-  const rulesListContainer = document.getElementById('rules-list-container');
-  if (rulesListContainer) {
-    rulesListContainer.addEventListener('change', async e => {
-      if (e.target.classList.contains('toggle-rule-checkbox')) {
-        const id = e.target.getAttribute('data-id');
-        try {
-          const res = await fetch(`/api/rules/${id}/toggle`, { method: 'PATCH' });
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error || 'Failed to toggle rule');
-          showToast(`Rule #${id} is now ${data.is_active ? 'Active' : 'Paused'}`, 'info');
-          await fetchDashboardData();
-        } catch (err) {
-          showToast(err.message, 'error');
-          e.target.checked = !e.target.checked;
-        }
-      }
-    });
-
-    rulesListContainer.addEventListener('click', async e => {
-      const delBtn = e.target.closest('.btn-delete-rule');
-      if (delBtn) {
-        const id = delBtn.getAttribute('data-id');
-        if (!confirm(`Are you sure you want to permanently delete rule #${id}?`)) {
-          return;
-        }
-        try {
-          const res = await fetch(`/api/rules/${id}`, { method: 'DELETE' });
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error || 'Failed to delete rule');
-          showToast(`Rule #${id} deleted`, 'success');
-          await fetchDashboardData();
-        } catch (err) {
-          showToast(err.message, 'error');
-        }
-      }
-    });
-  }
-
-  // 7. Interactive Traffic Simulator
-  const formSimulate = document.getElementById('form-simulate');
-  if (formSimulate) {
-    formSimulate.addEventListener('submit', async e => {
-      e.preventDefault();
-      const ruleType = document.getElementById('sim-type-select').value;
-      const target = document.getElementById('sim-target-input').value.trim();
-
-      try {
-        const res = await fetch('/api/simulate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ rule_type: ruleType, target: target }),
-        });
-
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Simulation failed');
-
-        // Render verdict banner
-        const verdictCard = document.getElementById('sim-verdict-card');
-        const verdictStatus = document.getElementById('sim-verdict-status');
-        const verdictTime = document.getElementById('sim-verdict-time');
-        const verdictTarget = document.getElementById('sim-verdict-target');
-        const verdictReason = document.getElementById('sim-verdict-reason');
-
-        if (verdictCard) {
-          verdictCard.classList.remove('hidden');
-          const isBlock = data.status === 'BLOCKED';
-          verdictCard.className = isBlock
-            ? 'mt-4 p-3 rounded-lg border bg-rose-950/70 border-rose-500/70 cyber-glow-rose'
-            : 'mt-4 p-3 rounded-lg border bg-emerald-950/70 border-emerald-500/70 cyber-glow-emerald';
-
-          if (verdictStatus) {
-            verdictStatus.textContent = isBlock ? 'VERDICT: BLOCKED' : 'VERDICT: ALLOWED';
-            verdictStatus.className = isBlock ? 'text-xs font-bold font-mono text-rose-400' : 'text-xs font-bold font-mono text-emerald-400';
-          }
-          if (verdictTime) verdictTime.textContent = 'JUST NOW';
-          if (verdictTarget) verdictTarget.textContent = data.target;
-          if (verdictReason) verdictReason.textContent = data.reason;
-
-          if (isBlock) {
-            triggerBlockedAlert();
-          }
-        }
-
-        await fetchDashboardData();
-      } catch (err) {
-        showToast(err.message, 'error');
-      }
-    });
-  }
-
-  // 8. Simulator Preset Chips
-  const simChips = document.querySelectorAll('.sim-chip');
-  simChips.forEach(chip => {
-    chip.addEventListener('click', () => {
-      const type = chip.getAttribute('data-type');
-      const val = chip.getAttribute('data-val');
-
-      const simType = document.getElementById('sim-type-select');
-      const simTarget = document.getElementById('sim-target-input');
-
-      if (simType) simType.value = type;
-      if (simTarget) simTarget.value = val;
-
-      // Auto trigger simulation
-      formSimulate?.dispatchEvent(new Event('submit'));
-    });
-  });
-
-  // 9. Log Filters
-  const logFilterBtns = document.querySelectorAll('.log-filter-btn');
-  logFilterBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      logFilterBtns.forEach(b => {
-        b.className = 'log-filter-btn px-2.5 py-1 text-xs font-mono rounded text-slate-400 hover:text-white border border-transparent';
-      });
-      btn.className = 'log-filter-btn active px-2.5 py-1 text-xs font-mono rounded bg-cyber-800 text-white border border-slate-600';
-      state.activeLogFilter = btn.getAttribute('data-status');
-      renderLogs();
-    });
-  });
-
-  // 10. Search Logs Input
-  const searchLogsInput = document.getElementById('search-logs-input');
-  if (searchLogsInput) {
-    searchLogsInput.addEventListener('input', e => {
-      state.logSearchQuery = e.target.value.trim();
-      renderLogs();
-    });
-  }
-
-  // 11. Clear Logs Button
-  const btnClearLogs = document.getElementById('btn-clear-logs');
-  if (btnClearLogs) {
-    btnClearLogs.addEventListener('click', () => {
-      if (state.settings.guided_mode) {
-        // Must prompt for PIN
-        openPinModal('clear_logs', 'Supervisor Authentication Required', 'Guided Mode is active. Enter Supervisor PIN to purge network telemetry.');
-      } else {
-        if (confirm('Are you sure you want to clear all network telemetry logs?')) {
-          executeClearLogs('');
-        }
-      }
-    });
-  }
-
-  // 12. Toggle Handover Lock (Guided Mode)
-  const btnToggleLock = document.getElementById('btn-toggle-lock');
-  if (btnToggleLock) {
-    btnToggleLock.addEventListener('click', () => {
-      const targetState = !state.settings.guided_mode;
-      const title = targetState ? 'Enable Guided Handover' : 'Disable Guided Handover';
-      const desc = targetState
-        ? 'Lock network control panel and enforce policy sync on bound Android device.'
-        : 'Unlock control panel using Supervisor PIN.';
-      openPinModal('toggle_mode', title, desc);
-    });
-  }
-
-  // 13. Supervisor PIN Modal Actions
-  const btnCancelPin = document.getElementById('btn-cancel-pin-modal');
-  const btnConfirmPin = document.getElementById('btn-confirm-pin');
-  const modalPin = document.getElementById('modal-pin');
-  const inputPin = document.getElementById('input-supervisor-pin');
-
-  if (btnCancelPin) btnCancelPin.addEventListener('click', closePinModal);
-  if (modalPin) {
-    modalPin.addEventListener('click', e => {
-      if (e.target === modalPin) closePinModal();
-    });
-  }
-
-  if (btnConfirmPin && inputPin) {
-    const submitPinAction = async () => {
-      const pin = inputPin.value.trim();
-      if (!pin) {
-        showPinError('PIN is required.');
-        return;
-      }
-
-      if (state.pinAction === 'toggle_mode') {
-        const targetState = !state.settings.guided_mode;
-        try {
-          const res = await fetch('/api/settings/guided-mode', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ enabled: targetState, pin: pin }),
-          });
-
-          const data = await res.json();
-          if (!res.ok) throw new Error(data.error || 'Authentication failed');
-
-          showToast(
-            `Guided Mode ${data.guided_mode ? 'LOCKED' : 'UNLOCKED'} successfully`,
-            'success'
-          );
-          closePinModal();
-          await fetchDashboardData();
-        } catch (err) {
-          showPinError(err.message);
-        }
-      } else if (state.pinAction === 'clear_logs') {
-        executeClearLogs(pin);
-      }
-    };
-
-    btnConfirmPin.addEventListener('click', submitPinAction);
-    inputPin.addEventListener('keydown', e => {
-      if (e.key === 'Enter') submitPinAction();
-    });
-  }
-
-  // 14. Change PIN Modal
-  const btnOpenPinModal = document.getElementById('btn-open-pin-modal');
-  const modalChangePin = document.getElementById('modal-change-pin');
-  const btnCancelChangePin = document.getElementById('btn-cancel-change-pin');
-  const formChangePin = document.getElementById('form-change-pin');
-
-  if (btnOpenPinModal && modalChangePin) {
-    btnOpenPinModal.addEventListener('click', () => {
-      modalChangePin.classList.remove('hidden');
-      document.getElementById('input-current-pin')?.focus();
-    });
-  }
-  if (btnCancelChangePin && modalChangePin) {
-    btnCancelChangePin.addEventListener('click', () => modalChangePin.classList.add('hidden'));
-  }
-  if (modalChangePin) {
-    modalChangePin.addEventListener('click', e => {
-      if (e.target === modalChangePin) modalChangePin.classList.add('hidden');
-    });
-  }
-
-  if (formChangePin) {
-    formChangePin.addEventListener('submit', async e => {
-      e.preventDefault();
-      const curPin = document.getElementById('input-current-pin').value.trim();
-      const newPin = document.getElementById('input-new-pin').value.trim();
-      const confirmPin = document.getElementById('input-confirm-new-pin').value.trim();
-      const errBox = document.getElementById('change-pin-error');
-
-      if (newPin !== confirmPin) {
-        if (errBox) {
-          errBox.textContent = 'New PIN and Confirmation PIN do not match.';
-          errBox.classList.remove('hidden');
-        }
-        return;
-      }
-
-      if (!/^\d{4,8}$/.test(newPin)) {
-        if (errBox) {
-          errBox.textContent = 'New PIN must be 4 to 8 numeric digits.';
-          errBox.classList.remove('hidden');
-        }
-        return;
-      }
-
-      try {
-        const res = await fetch('/api/settings/pin', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ current_pin: curPin, new_pin: newPin }),
-        });
-
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Failed to update PIN');
-
-        showToast('Supervisor PIN updated successfully', 'success');
-        modalChangePin.classList.add('hidden');
-        formChangePin.reset();
-        if (errBox) errBox.classList.add('hidden');
-      } catch (err) {
-        if (errBox) {
-          errBox.textContent = err.message;
-          errBox.classList.remove('hidden');
-        }
-      }
-    });
-  }
-
-  // 15. Edit Device Name Modal
-  const btnEditDev = document.getElementById('btn-edit-device');
-  const modalDev = document.getElementById('modal-device');
-  const btnCancelDev = document.getElementById('btn-cancel-device-modal');
-  const formEditDev = document.getElementById('form-edit-device');
-  const inputDev = document.getElementById('input-device-name');
-
-  if (btnEditDev && modalDev && inputDev) {
-    btnEditDev.addEventListener('click', () => {
-      inputDev.value = state.settings.device_name || 'Android Handover Device';
-      modalDev.classList.remove('hidden');
-      inputDev.focus();
-    });
-  }
-  if (btnCancelDev && modalDev) {
-    btnCancelDev.addEventListener('click', () => modalDev.classList.add('hidden'));
-  }
-  if (modalDev) {
-    modalDev.addEventListener('click', e => {
-      if (e.target === modalDev) modalDev.classList.add('hidden');
-    });
-  }
-
-  if (formEditDev && inputDev) {
-    formEditDev.addEventListener('submit', async e => {
-      e.preventDefault();
-      const newName = inputDev.value.trim();
-      if (!newName) return;
-
-      try {
-        const res = await fetch('/api/settings/device', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ device_name: newName }),
-        });
-
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Failed to update device');
-
-        showToast(`Target device renamed to "${data.device_name}"`, 'success');
-        modalDev.classList.add('hidden');
-        state.settings.device_name = data.device_name;
-        renderSettings(state.settings);
-      } catch (err) {
-        showToast(err.message, 'error');
-      }
-    });
-  }
-
-  // Global Escape key to dismiss modals
-  window.addEventListener('keydown', e => {
-    if (e.key === 'Escape') {
-      closePinModal();
-      modalChangePin?.classList.add('hidden');
-      modalDev?.classList.add('hidden');
+function promptClearLogs() {
+  if (state.deviceData?.guided_mode) {
+    state.pinAction = { type: 'clear_logs' };
+    openPinModal('Supervisor Verification Required', 'Guided Mode is active. Enter Supervisor PIN to purge telemetry logs.');
+  } else {
+    if (confirm('Are you sure you want to clear all network telemetry logs?')) {
+      executeClearLogs('');
     }
-  });
-}
-
-function openPinModal(action, title, desc) {
-  state.pinAction = action;
-  const modal = document.getElementById('modal-pin');
-  const titleEl = document.getElementById('modal-pin-title');
-  const descEl = document.getElementById('modal-pin-desc');
-  const input = document.getElementById('input-supervisor-pin');
-  const err = document.getElementById('pin-error-msg');
-
-  if (titleEl) titleEl.textContent = title;
-  if (descEl) descEl.textContent = desc;
-  if (err) err.classList.add('hidden');
-  if (input) {
-    input.value = '';
-    setTimeout(() => input.focus(), 50);
   }
-  if (modal) modal.classList.remove('hidden');
 }
 
-function closePinModal() {
-  const modal = document.getElementById('modal-pin');
-  if (modal) modal.classList.add('hidden');
-  const input = document.getElementById('input-supervisor-pin');
-  if (input) input.value = '';
-  const err = document.getElementById('pin-error-msg');
-  if (err) err.classList.add('hidden');
-  state.pinAction = null;
+function openPinModal(title, desc) {
+  document.getElementById('modal-pin-title').textContent = title;
+  document.getElementById('modal-pin-desc').textContent = desc;
+  document.getElementById('input-supervisor-pin').value = '';
+  document.getElementById('modal-pin-error').style.display = 'none';
+  document.getElementById('modal-pin').classList.remove('hidden');
+  document.getElementById('input-supervisor-pin').focus();
 }
 
-function showPinError(msg) {
-  const err = document.getElementById('pin-error-msg');
-  if (err) {
-    err.textContent = msg;
-    err.classList.remove('hidden');
+function closeModal(modalId) {
+  document.getElementById(modalId)?.classList.add('hidden');
+}
+
+function handleBackdropClick(e, modalId) {
+  if (e.target.id === modalId) {
+    closeModal(modalId);
+  }
+}
+
+async function executePinAction() {
+  const pin = document.getElementById('input-supervisor-pin').value.trim();
+  const errBox = document.getElementById('modal-pin-error');
+  if (!pin) {
+    errBox.textContent = 'Please enter your Supervisor PIN';
+    errBox.style.display = 'block';
+    return;
+  }
+
+  const action = state.pinAction;
+  if (!action) return;
+
+  try {
+    if (action.type === 'guided_mode') {
+      const res = await fetch(`/api/devices/${state.currentDeviceId}/guided-mode`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin, enabled: action.targetState })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Authentication failed');
+
+      showToast(`Guided Mode ${data.guided_mode ? 'LOCKED' : 'UNLOCKED'}`, 'success');
+      closeModal('modal-pin');
+      await fetchDeviceData();
+
+    } else if (action.type === 'uninstall_permission') {
+      const res = await fetch(`/api/devices/${state.currentDeviceId}/uninstall-permission`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Authentication failed');
+
+      showToast('Uninstall protection unlocked for 10 minutes', 'success');
+      closeModal('modal-pin');
+      await fetchDeviceData();
+
+    } else if (action.type === 'clear_logs') {
+      executeClearLogs(pin);
+    }
+  } catch (err) {
+    errBox.textContent = err.message;
+    errBox.style.display = 'block';
   }
 }
 
 async function executeClearLogs(pin) {
   try {
-    const res = await fetch('/api/logs', {
+    const res = await fetch(`/api/devices/${state.currentDeviceId}/logs`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: pin }),
+      body: JSON.stringify({ pin })
     });
-
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to clear logs');
 
-    showToast('Network telemetry logs cleared', 'success');
-    closePinModal();
-    await fetchDashboardData();
+    showToast('Telemetry logs purged', 'success');
+    closeModal('modal-pin');
+    await fetchDeviceData();
   } catch (err) {
-    if (state.pinAction === 'clear_logs') {
-      showPinError(err.message);
+    const errBox = document.getElementById('modal-pin-error');
+    if (errBox) {
+      errBox.textContent = err.message;
+      errBox.style.display = 'block';
     } else {
       showToast(err.message, 'error');
     }
@@ -1155,21 +971,387 @@ async function executeClearLogs(pin) {
 }
 
 // ============================================================================
+// WAIVER ACTIONS
+// ============================================================================
+
+async function handleWaiverAction(waiverId, action, durationMins = 10) {
+  try {
+    const res = await fetch(`/api/waivers/${waiverId}/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, duration_minutes: durationMins })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to process waiver');
+
+    showToast(`Waiver ${data.waiver_status === 'APPROVED' ? 'Approved for ' + durationMins + 'm' : 'Denied'}`, 'success');
+    await fetchDeviceData();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function revokeWaiver(waiverId) {
+  try {
+    const res = await fetch(`/api/waivers/${waiverId}/revoke`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to revoke waiver');
+
+    showToast('Waiver revoked early', 'info');
+    await fetchDeviceData();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function grantQuickAppWaiver(pkg, name) {
+  try {
+    const res = await fetch(`/api/devices/${state.currentDeviceId}/waivers/grant`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        target_type: 'app',
+        target: pkg,
+        display_name: name,
+        duration_minutes: 10
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to grant waiver');
+
+    showToast(`10-minute Emergency Waiver granted for ${name}`, 'success');
+    await fetchDeviceData();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// ============================================================================
+// APP POLICY MANAGEMENT
+// ============================================================================
+
+function filterApps(tab) {
+  state.appFilterTab = tab;
+  document.querySelectorAll('#apps-filter-tabs .tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-filter') === tab);
+  });
+  renderAppsTable();
+}
+
+function handleAppSearch(query) {
+  state.appSearchQuery = query.trim();
+  renderAppsTable();
+}
+
+function openConfigurePolicyModal(pkg, name, mode, start, end, limitMins, isActive) {
+  document.getElementById('policy-pkg').value = pkg;
+  document.getElementById('policy-display-name').value = name;
+  document.getElementById('policy-modal-appname').textContent = `${name} (${pkg})`;
+  document.getElementById('policy-mode').value = mode;
+  document.getElementById('policy-start').value = start || '16:00';
+  document.getElementById('policy-end').value = end || '21:00';
+  document.getElementById('policy-limit-mins').value = limitMins || 60;
+  document.getElementById('policy-active').checked = isActive;
+
+  handlePolicyModeChange(mode);
+  document.getElementById('modal-policy').classList.remove('hidden');
+}
+
+function handlePolicyModeChange(mode) {
+  document.getElementById('policy-schedule-fields').style.display = mode === 'SCHEDULE' ? 'grid' : 'none';
+  document.getElementById('policy-limit-fields').style.display = mode === 'DAILY_LIMIT' ? 'block' : 'none';
+}
+
+async function handleSavePolicy(e) {
+  e.preventDefault();
+  const pkg = document.getElementById('policy-pkg').value;
+  const name = document.getElementById('policy-display-name').value;
+  const mode = document.getElementById('policy-mode').value;
+  const start = document.getElementById('policy-start').value.trim();
+  const end = document.getElementById('policy-end').value.trim();
+  const limitMins = parseInt(document.getElementById('policy-limit-mins').value, 10);
+  const isActive = document.getElementById('policy-active').checked;
+
+  try {
+    const res = await fetch(`/api/devices/${state.currentDeviceId}/apps/policy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        package_name: pkg,
+        app_name: name,
+        policy_mode: mode,
+        schedule_start: start,
+        schedule_end: end,
+        daily_limit_minutes: limitMins,
+        is_active: isActive
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to save policy');
+
+    showToast(`Policy updated for ${name}`, 'success');
+    closeModal('modal-policy');
+    await fetchDeviceData();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function toggleAppPolicy(pkg, newActiveState) {
+  try {
+    const res = await fetch(`/api/devices/${state.currentDeviceId}/apps/${encodeURIComponent(pkg)}/toggle`, {
+      method: 'PATCH'
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to toggle policy');
+
+    showToast(`Policy is now ${data.is_active ? 'Active' : 'Paused'}`, 'info');
+    await fetchDeviceData();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+function openAddManualAppModal() {
+  document.getElementById('manual-app-pkg').value = '';
+  document.getElementById('manual-app-name').value = '';
+  document.getElementById('modal-add-app').classList.remove('hidden');
+}
+
+async function handleManualAppSubmit(e) {
+  e.preventDefault();
+  const pkg = document.getElementById('manual-app-pkg').value.trim();
+  const name = document.getElementById('manual-app-name').value.trim();
+
+  try {
+    const res = await fetch(`/api/devices/${state.currentDeviceId}/apps/manual`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ package_name: pkg, app_name: name })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to add app');
+
+    showToast(`Registered app ${data.app_name}`, 'success');
+    closeModal('modal-add-app');
+    await fetchDeviceData();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// ============================================================================
+// NETWORK RULES (DNS / IP)
+// ============================================================================
+
+function handleRuleTypeChange(type) {
+  const targetInput = document.getElementById('rule-target');
+  if (type === 'domain') {
+    targetInput.placeholder = 'e.g. instagram.com or reels.instagram.com';
+  } else {
+    targetInput.placeholder = 'e.g. 157.240.22.174';
+  }
+}
+
+function filterRules(tab) {
+  state.ruleFilterTab = tab;
+  document.querySelectorAll('#rules-filter-tabs .tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-tab') === tab);
+  });
+  renderNetworkRulesTable();
+}
+
+async function handleAddNetworkRule(e) {
+  e.preventDefault();
+  const type = document.getElementById('rule-type').value;
+  const action = document.getElementById('rule-action').value;
+  const target = document.getElementById('rule-target').value.trim();
+  const duration = document.getElementById('rule-duration').value;
+  const note = document.getElementById('rule-note').value.trim();
+
+  try {
+    const res = await fetch(`/api/devices/${state.currentDeviceId}/network-rules`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        rule_type: type,
+        action: action,
+        target: target,
+        duration_mins: duration ? parseInt(duration, 10) : null,
+        note: note
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to deploy rule');
+
+    showToast(`Network rule deployed for ${data.target}`, 'success');
+    document.getElementById('rule-target').value = '';
+    document.getElementById('rule-note').value = '';
+    await fetchDeviceData();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function toggleNetworkRule(ruleId) {
+  try {
+    const res = await fetch(`/api/network-rules/${ruleId}/toggle`, { method: 'PATCH' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to toggle rule');
+
+    showToast(`Rule #${ruleId} is now ${data.is_active ? 'Active' : 'Paused'}`, 'info');
+    await fetchDeviceData();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function deleteNetworkRule(ruleId) {
+  if (!confirm(`Delete rule #${ruleId}?`)) return;
+  try {
+    const res = await fetch(`/api/network-rules/${ruleId}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to delete rule');
+
+    showToast(`Rule #${ruleId} deleted`, 'success');
+    await fetchDeviceData();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+// ============================================================================
+// SIMULATOR & LOGS
+// ============================================================================
+
+function setSimPreset(type, target, time, used) {
+  document.getElementById('sim-type').value = type;
+  document.getElementById('sim-target').value = target;
+  document.getElementById('sim-time').value = time;
+  document.getElementById('sim-used-mins').value = used;
+  document.getElementById('form-simulate')?.dispatchEvent(new Event('submit'));
+}
+
+async function handleSimulate(e) {
+  e.preventDefault();
+  const type = document.getElementById('sim-type').value;
+  const target = document.getElementById('sim-target').value.trim();
+  const time = document.getElementById('sim-time').value.trim() || '12:00';
+  const used = parseInt(document.getElementById('sim-used-mins').value || '0', 10);
+
+  try {
+    const res = await fetch(`/api/devices/${state.currentDeviceId}/simulate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: type,
+        target: target,
+        sim_time: time,
+        sim_used_mins: used
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Simulation failed');
+
+    const box = document.getElementById('sim-verdict-box');
+    const badge = document.getElementById('sim-verdict-badge');
+    const timeEl = document.getElementById('sim-verdict-time');
+    const targetEl = document.getElementById('sim-verdict-target');
+    const reasonEl = document.getElementById('sim-verdict-reason');
+
+    box.style.display = 'block';
+    targetEl.textContent = data.target;
+    reasonEl.textContent = data.reason;
+    timeEl.textContent = `SIM TIME: ${data.sim_time}`;
+
+    if (data.status === 'BLOCKED') {
+      box.style.backgroundColor = 'rgba(244, 63, 94, 0.2)';
+      box.style.border = '1px solid rgba(244, 63, 94, 0.6)';
+      badge.className = 'pill pill-rose';
+      badge.textContent = 'VERDICT: BLOCKED';
+      triggerBlockedAlert();
+    } else if (data.status === 'WAIVED') {
+      box.style.backgroundColor = 'rgba(245, 158, 11, 0.2)';
+      box.style.border = '1px solid rgba(245, 158, 11, 0.6)';
+      badge.className = 'pill pill-amber';
+      badge.textContent = 'VERDICT: WAIVED';
+    } else {
+      box.style.backgroundColor = 'rgba(16, 185, 129, 0.2)';
+      box.style.border = '1px solid rgba(16, 185, 129, 0.6)';
+      badge.className = 'pill pill-emerald';
+      badge.textContent = 'VERDICT: ALLOWED';
+    }
+
+    await fetchDeviceData();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+function filterLogs(status) {
+  state.logFilterStatus = status;
+  document.querySelectorAll('#logs-filter-tabs .tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-status') === status);
+  });
+  renderLogsTable(state.logs);
+}
+
+function handleLogSearch(query) {
+  state.logSearchQuery = query.trim();
+  renderLogsTable(state.logs);
+}
+
+// ============================================================================
+// DEVICE CREATION & LOGOUT
+// ============================================================================
+
+function openAddDeviceModal() {
+  document.getElementById('new-device-name').value = '';
+  document.getElementById('modal-add-device').classList.remove('hidden');
+}
+
+async function handleNewDeviceSubmit(e) {
+  e.preventDefault();
+  const name = document.getElementById('new-device-name').value.trim();
+  try {
+    const res = await fetch('/api/devices', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_name: name })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to create device');
+
+    showToast(`Device "${data.device_name}" created with Identity Key ${data.pairing_key}`, 'success');
+    closeModal('modal-add-device');
+    state.currentDeviceId = data.id;
+    await fetchDevicesList();
+    await fetchDeviceData();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function handleLogout() {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  window.location.href = '/login';
+}
+
+// ============================================================================
 // SYSTEM BOOTSTRAP
 // ============================================================================
 
 document.addEventListener('DOMContentLoaded', async () => {
-  initCharts();
-  setupEventListeners();
   startCountdownTicker();
 
-  // Initial sync
+  // Initial Sync
   await checkDatabaseHealth();
-  await fetchDashboardData();
+  await fetchDevicesList();
+  await fetchDeviceData();
 
-  // Overlap-safe periodic polling
+  // Periodic Overlap-Safe Polling (every 3 seconds)
   setInterval(async () => {
     await checkDatabaseHealth();
-    await fetchDashboardData();
+    await fetchDeviceData();
   }, 3000);
 });

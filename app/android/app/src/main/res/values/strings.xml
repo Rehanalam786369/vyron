@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VYRON</string>
+    <string name="accessibility_service_description">VYRON System-Level App Guard monitors foreground window state changes to enforce scheduled quiet hours and daily parental usage limits without battery lag.</string>
+</resources>

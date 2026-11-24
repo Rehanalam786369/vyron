@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VYRON — Authentication & Supervisor Access</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22><text y=%2220%22 font-size=%2220%22>🛡️</text></svg>">
+  <link rel="stylesheet" href="/static/css/styles.css">
+  <style>
+    .auth-wrapper {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+      background: radial-gradient(circle at 50% 20%, rgba(6, 182, 212, 0.12), transparent 50%), var(--bg-base);
+    }
+    .auth-box {
+      width: 100%;
+      max-width: 440px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="auth-wrapper">
+    <div class="auth-box cyber-card cyber-card-active">
+      
+      <!-- Brand Header -->
+      <div class="flex items-center justify-center gap-3 mb-4">
+        <div class="logo-badge">V</div>
+        <div>
+          <div class="logo-title">VYRON</div>
+          <div style="font-size: 0.72rem; color: var(--text-muted); font-family: var(--font-mono);">
+            Beyond Connections. Total Control.
+          </div>
+        </div>
+      </div>
+
+      <div style="text-align: center; margin-bottom: 1.25rem;">
+        <span class="pill pill-cyan">CLOSED-LOOP PRIVACY ENGINE</span>
+      </div>
+
+      <!-- Auth Switcher Tabs -->
+      <div class="tab-group justify-center mb-4">
+        <button type="button" class="tab-btn active" id="tab-login" onclick="switchAuthTab('login')">Parent Login</button>
+        <button type="button" class="tab-btn" id="tab-register" onclick="switchAuthTab('register')">New Account</button>
+      </div>
+
+      <!-- Error Message Banner -->
+      <div id="auth-error" style="display: none; padding: 0.6rem 0.8rem; background: rgba(244, 63, 94, 0.15); border: 1px solid rgba(244, 63, 94, 0.4); border-radius: 8px; color: #fb7185; font-size: 0.8rem; margin-bottom: 1rem; text-align: center;"></div>
+
+      <!-- LOGIN FORM -->
+      <form id="form-login" onsubmit="handleLogin(event)">
+        <div class="form-group">
+          <label class="form-label">Email Address</label>
+          <input type="email" id="login-email" class="form-input" placeholder="supervisor@domain.com" required autocomplete="email">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Password</label>
+          <input type="password" id="login-password" class="form-input" placeholder="••••••••" required autocomplete="current-password">
+        </div>
+
+        <button type="submit" class="btn btn-cyan btn-full btn-lg mt-3" style="margin-top: 0.75rem;">
+          Sign In to Control Panel
+        </button>
+      </form>
+
+      <!-- REGISTER FORM -->
+      <form id="form-register" style="display: none;" onsubmit="handleRegister(event)">
+        <div class="form-group">
+          <label class="form-label">Full Name</label>
+          <input type="text" id="reg-name" class="form-input" placeholder="e.g. Anish Gupta" required autocomplete="name">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Email Address</label>
+          <input type="email" id="reg-email" class="form-input" placeholder="supervisor@domain.com" required autocomplete="email">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Password</label>
+          <input type="password" id="reg-password" class="form-input" placeholder="••••••••" required autocomplete="new-password">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Supervisor PIN (4-8 Digits)</label>
+          <input type="password" id="reg-pin" class="form-input" placeholder="1234" maxlength="8" required>
+          <span style="font-size: 0.7rem; color: var(--text-dim);">Used to authorize emergency lock/unlock & uninstall requests.</span>
+        </div>
+
+        <button type="submit" class="btn btn-purple btn-full btn-lg" style="margin-top: 0.75rem;">
+          Create Supervisor Account
+        </button>
+      </form>
+
+      <!-- 1-Click Demo Shortcut -->
+      <div style="margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--border-dim); text-align: center;">
+        <span style="font-size: 0.75rem; color: var(--text-muted); display: block; margin-bottom: 0.5rem;">
+          Quick Hackathon Judge Login:
+        </span>
+        <button type="button" class="btn btn-dark btn-sm" onclick="fillDemoCredentials()">
+          1-Click Demo Login (<span style="color: #38bdf8; font-family: var(--font-mono);">demo@vyron.local</span>)
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    function switchAuthTab(tab) {
+      document.getElementById('tab-login').classList.toggle('active', tab === 'login');
+      document.getElementById('tab-register').classList.toggle('active', tab === 'register');
+      document.getElementById('form-login').style.display = tab === 'login' ? 'block' : 'none';
+      document.getElementById('form-register').style.display = tab === 'register' ? 'block' : 'none';
+      hideError();
+    }
+
+    function showError(msg) {
+      const err = document.getElementById('auth-error');
+      err.textContent = msg;
+      err.style.display = 'block';
+    }
+
+    function hideError() {
+      document.getElementById('auth-error').style.display = 'none';
+    }
+
+    async function handleLogin(e) {
+      e.preventDefault();
+      hideError();
+      const email = document.getElementById('login-email').value.trim();
+      const password = document.getElementById('login-password').value;
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const errMsg = data.error || data.detail || 'Login failed';
+          throw new Error(errMsg);
+        }
+        window.location.href = '/';
+      } catch (err) {
+        showError(err.message);
+      }
+    }
+
+    async function handleRegister(e) {
+      e.preventDefault();
+      hideError();
+      const full_name = document.getElementById('reg-name').value.trim();
+      const email = document.getElementById('reg-email').value.trim();
+      const password = document.getElementById('reg-password').value;
+      const supervisor_pin = document.getElementById('reg-pin').value.trim();
+
+      try {
+        const res = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ full_name, email, password, supervisor_pin })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const errMsg = data.error || data.detail || 'Registration failed';
+          throw new Error(errMsg);
+        }
+        window.location.href = '/';
+      } catch (err) {
+        showError(err.message);
+      }
+    }
+
+    function fillDemoCredentials() {
+      switchAuthTab('login');
+      document.getElementById('login-email').value = 'demo@vyron.local';
+      document.getElementById('login-password').value = 'vyron1234';
+      document.getElementById('form-login').dispatchEvent(new Event('submit'));
+    }
+  </script>
+</body>
+</html>
