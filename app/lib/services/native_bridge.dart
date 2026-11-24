@@ -128,4 +128,25 @@ class NativeBridge {
       await _channel.invokeMethod('openWifiSettings');
     } catch (_) {}
   }
+
+  // Open VYRON Safe Browser
+  static Future<void> openSafeBrowser([String url = 'https://www.google.com']) async {
+    try {
+      await _channel.invokeMethod('openSafeBrowser', {'url': url});
+    } catch (_) {}
+  }
+
+  // Open Android Default Apps settings (to set VYRON as Default Browser)
+  static Future<void> openDefaultAppsSettings() async {
+    try {
+      await _channel.invokeMethod('openDefaultAppsSettings');
+    } catch (_) {}
+  }
+
+  // Open Android VPN settings (to toggle Always-on VPN for VYRON)
+  static Future<void> openVpnSettings() async {
+    try {
+      await _channel.invokeMethod('openVpnSettings');
+    } catch (_) {}
+  }
 }

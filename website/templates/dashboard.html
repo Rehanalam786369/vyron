@@ -133,23 +133,19 @@
             </div>
           </div>
 
-          <!-- STEALTH DNS CONFIGURATION (ZERO-VPN MODE) -->
-          <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 8px; padding: 0.65rem 0.85rem; margin-bottom: 0.75rem;">
+          <!-- ON-PHONE DEFAULT DNS & BROWSER ENFORCEMENT -->
+          <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 8px; padding: 0.7rem 0.85rem; margin-bottom: 0.75rem;">
             <div class="flex items-center justify-between mb-1">
               <span style="font-size: 0.7rem; font-weight: 700; color: #38bdf8; letter-spacing: 0.05em;">
-                🛡️ WI-FI DNS SHIELD (ZERO VPN ICON)
+                🛡️ ON-PHONE DEFAULT DNS CACHE
               </span>
-              <span class="pill pill-green" style="font-size: 0.65rem;">NO VPN ICON</span>
+              <span class="pill pill-green" style="font-size: 0.65rem;">ONLINE &amp; OFFLINE</span>
             </div>
-            <div style="font-size: 0.72rem; color: var(--text-dim); margin-bottom: 0.4rem;">
-              Set in Android <strong>Wi-Fi → [Network] → Advanced → Static IP → DNS 1</strong>:
+            <div style="font-size: 0.72rem; color: var(--text-dim); line-height: 1.4;">
+              DNS rules added below sync to the phone's local cache and enforce across <strong>every browser &amp; app in 0ms</strong> — even when offline or sleeping cloud host.
             </div>
-            <div class="flex items-center gap-2">
-              <span id="dns-hostname-display" class="key-box" style="font-size: 0.82rem; padding: 0.25rem 0.5rem; color: #38bdf8;">10.101.172.157</span>
-              <button type="button" class="btn btn-cyan btn-sm" onclick="copyPrivateDns()">Copy DNS IP</button>
-            </div>
-            <div style="font-size: 0.68rem; color: #64748b; margin-top: 0.35rem; line-height: 1.3;">
-              💡 <em>Android Private DNS rejects local hostnames. Setting Wi-Fi DNS 1 above blocks restricted sites with zero status bar icons!</em>
+            <div style="font-size: 0.68rem; color: #34d399; margin-top: 0.35rem; line-height: 1.35;">
+              ✨ <em>Tip: Enable <strong>"Enable On-Phone DNS"</strong> in the VYRON app to force all browsers, OR set <strong>VYRON Browser</strong> as default for zero VPN icon!</em>
             </div>
           </div>
         </div>

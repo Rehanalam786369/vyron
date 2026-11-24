@@ -46,6 +46,22 @@
             android:excludeFromRecents="true"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
 
+        <!-- 2b. VYRON Safe Browser (Default Browser option for Zero-VPN-Icon URL & DNS Filtering) -->
+        <activity
+            android:name=".VyronBrowserActivity"
+            android:label="VYRON Browser"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+            </intent-filter>
+        </activity>
+
         <!-- 3. Split-Tunnel DNS VpnService (Zero-Lag Kernel Routing) -->
         <service
             android:name=".VyronVpnService"
@@ -85,6 +101,16 @@
                 <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
                 <action android:name="android.app.action.DEVICE_ADMIN_DISABLE_REQUESTED" />
                 <action android:name="android.app.action.DEVICE_ADMIN_DISABLED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- 6. Boot Auto-Sync & DNS Shield Restorer -->
+        <receiver
+            android:name=".VyronBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 

@@ -28,7 +28,7 @@ class PolicyStore(private val context: Context) {
         context.applicationContext.getSharedPreferences("vyron_policy_store", Context.MODE_PRIVATE)
 
     var serverUrl: String
-        get() = prefs.getString("server_url", "http://10.0.2.2:5000") ?: "http://10.0.2.2:5000"
+        get() = prefs.getString("server_url", "https://vyron-sbkd.onrender.com") ?: "https://vyron-sbkd.onrender.com"
         set(value) = prefs.edit().putString("server_url", value).apply()
 
     var deviceToken: String
@@ -43,6 +43,14 @@ class PolicyStore(private val context: Context) {
         get() = prefs.getBoolean("uninstall_allowed", false)
         set(value) = prefs.edit().putBoolean("uninstall_allowed", value).apply()
 
+    var lastSyncEpochMs: Long
+        get() = prefs.getLong("last_sync_epoch_ms", 0L)
+        set(value) = prefs.edit().putLong("last_sync_epoch_ms", value).apply()
+
+    var autoStartVpn: Boolean
+        get() = prefs.getBoolean("auto_start_vpn", false)
+        set(value) = prefs.edit().putBoolean("auto_start_vpn", value).apply()
+
     fun saveCredentials(url: String, token: String) {
         prefs.edit()
             .putString("server_url", url)
@@ -50,15 +58,133 @@ class PolicyStore(private val context: Context) {
             .apply()
     }
 
+    companion object {
+        @Volatile
+        private var memRawJson: String? = null
+        @Volatile
+        private var memBlockedDomains: Set<String> = emptySet()
+        @Volatile
+        private var memAllowedDomains: Set<String> = emptySet()
+        @Volatile
+        private var memBlockedIps: Set<String> = emptySet()
+        @Volatile
+        private var memAppPolicies: List<AppPolicyItem> = emptyList()
+        @Volatile
+        private var memActiveWaivers: List<ActiveWaiverItem> = emptyList()
+
+        /**
+         * Safely extracts a host candidate (e.g. "www.instagram.com") from a browser URL bar string.
+         * Returns null for search queries, incomplete words without dots, or empty strings.
+         */
+        fun extractDomainFromBrowserText(rawText: String?): String? {
+            if (rawText.isNullOrBlank()) return null
+            val cleaned = rawText.trim().lowercase()
+            if (cleaned.startsWith("about:") || cleaned.startsWith("chrome:") ||
+                cleaned.startsWith("file:") || cleaned.startsWith("data:") ||
+                cleaned.startsWith("javascript:")
+            ) {
+                return null
+            }
+            val noScheme = cleaned.removePrefix("https://").removePrefix("http://")
+            val authority = noScheme
+                .substringBefore('/')
+                .substringBefore('?')
+                .substringBefore('#')
+                .substringBefore(':')
+                .substringAfter('@')
+                .trimEnd('.')
+
+            if (authority.length < 3 || authority.length > 253 || !authority.contains('.')) return null
+            if (authority.startsWith('.') || authority.contains("..")) return null
+            for (ch in authority) {
+                val ok = (ch in 'a'..'z') || (ch in '0'..'9') || ch == '-' || ch == '.'
+                if (!ok) return null
+            }
+            return authority
+        }
+    }
+
+    private fun ensureMemLoaded() {
+        val raw = prefs.getString("cached_policy_json", null) ?: return
+        if (raw == memRawJson) return
+        synchronized(PolicyStore::class.java) {
+            if (raw == memRawJson) return
+            try {
+                val root = JSONObject(raw)
+
+                val appsList = mutableListOf<AppPolicyItem>()
+                val appArr = root.optJSONArray("app_policies")
+                if (appArr != null) {
+                    for (i in 0 until appArr.length()) {
+                        val obj = appArr.getJSONObject(i)
+                        appsList.add(
+                            AppPolicyItem(
+                                packageName = obj.optString("package_name").lowercase(),
+                                appName = obj.optString("app_name"),
+                                policyMode = obj.optString("policy_mode", "ALLOW"),
+                                scheduleStart = if (obj.has("schedule_start") && !obj.isNull("schedule_start")) obj.getString("schedule_start") else null,
+                                scheduleEnd = if (obj.has("schedule_end") && !obj.isNull("schedule_end")) obj.getString("schedule_end") else null,
+                                dailyLimitMinutes = if (obj.has("daily_limit_minutes") && !obj.isNull("daily_limit_minutes")) obj.getInt("daily_limit_minutes") else null,
+                                isActive = obj.optBoolean("is_active", true)
+                            )
+                        )
+                    }
+                }
+
+                val bDomains = mutableSetOf<String>()
+                val aDomains = mutableSetOf<String>()
+                val bIps = mutableSetOf<String>()
+                val net = root.optJSONObject("network_rules")
+                if (net != null) {
+                    net.optJSONArray("blocked_domains")?.let { arr ->
+                        for (i in 0 until arr.length()) bDomains.add(arr.getString(i).lowercase())
+                    }
+                    net.optJSONArray("allowed_domains")?.let { arr ->
+                        for (i in 0 until arr.length()) aDomains.add(arr.getString(i).lowercase())
+                    }
+                    net.optJSONArray("blocked_ips")?.let { arr ->
+                        for (i in 0 until arr.length()) bIps.add(arr.getString(i))
+                    }
+                }
+
+                val waivers = mutableListOf<ActiveWaiverItem>()
+                val wArr = root.optJSONArray("active_waivers")
+                if (wArr != null) {
+                    for (i in 0 until wArr.length()) {
+                        val obj = wArr.getJSONObject(i)
+                        waivers.add(
+                            ActiveWaiverItem(
+                                targetType = obj.optString("target_type", "app").lowercase(),
+                                target = obj.optString("target").lowercase(),
+                                expiresAtEpochMs = obj.optLong("expires_at_epoch_ms", 0L)
+                            )
+                        )
+                    }
+                }
+
+                memAppPolicies = appsList
+                memBlockedDomains = bDomains
+                memAllowedDomains = aDomains
+                memBlockedIps = bIps
+                memActiveWaivers = waivers
+                memRawJson = raw
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
     fun saveFullPolicyJson(jsonStr: String) {
         try {
             val root = JSONObject(jsonStr)
             guidedMode = root.optBoolean("guided_mode", true)
             uninstallAllowed = root.optBoolean("uninstall_allowed", false)
+            lastSyncEpochMs = System.currentTimeMillis()
 
             prefs.edit().putString("cached_policy_json", jsonStr).apply()
+            ensureMemLoaded()
 
-            // Broadcast policy update so VpnService and AppGuard reload immediately
+            // Broadcast policy update so VpnService, LocalDns, and AppGuard reload immediately
             val intent = Intent("com.vyron.ACTION_POLICY_UPDATED").apply {
                 setPackage(context.packageName)
             }
@@ -69,99 +195,50 @@ class PolicyStore(private val context: Context) {
     }
 
     fun getAppPolicies(): List<AppPolicyItem> {
-        val list = mutableListOf<AppPolicyItem>()
-        val raw = prefs.getString("cached_policy_json", null) ?: return list
-        try {
-            val root = JSONObject(raw)
-            val arr = root.optJSONArray("app_policies") ?: return list
-            for (i in 0 until arr.length()) {
-                val obj = arr.getJSONObject(i)
-                list.add(
-                    AppPolicyItem(
-                        packageName = obj.optString("package_name").lowercase(),
-                        appName = obj.optString("app_name"),
-                        policyMode = obj.optString("policy_mode", "ALLOW"),
-                        scheduleStart = if (obj.has("schedule_start") && !obj.isNull("schedule_start")) obj.getString("schedule_start") else null,
-                        scheduleEnd = if (obj.has("schedule_end") && !obj.isNull("schedule_end")) obj.getString("schedule_end") else null,
-                        dailyLimitMinutes = if (obj.has("daily_limit_minutes") && !obj.isNull("daily_limit_minutes")) obj.getInt("daily_limit_minutes") else null,
-                        isActive = obj.optBoolean("is_active", true)
-                    )
-                )
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        return list
+        ensureMemLoaded()
+        return memAppPolicies
     }
 
     fun getBlockedDomains(): Set<String> {
-        val set = mutableSetOf<String>()
-        val raw = prefs.getString("cached_policy_json", null) ?: return set
-        try {
-            val root = JSONObject(raw)
-            val net = root.optJSONObject("network_rules") ?: return set
-            val arr = net.optJSONArray("blocked_domains") ?: return set
-            for (i in 0 until arr.length()) {
-                set.add(arr.getString(i).lowercase())
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        return set
+        ensureMemLoaded()
+        return memBlockedDomains
     }
 
     fun getAllowedDomains(): Set<String> {
-        val set = mutableSetOf<String>()
-        val raw = prefs.getString("cached_policy_json", null) ?: return set
-        try {
-            val root = JSONObject(raw)
-            val net = root.optJSONObject("network_rules") ?: return set
-            val arr = net.optJSONArray("allowed_domains") ?: return set
-            for (i in 0 until arr.length()) {
-                set.add(arr.getString(i).lowercase())
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        return set
+        ensureMemLoaded()
+        return memAllowedDomains
     }
 
     fun getBlockedIps(): Set<String> {
-        val set = mutableSetOf<String>()
-        val raw = prefs.getString("cached_policy_json", null) ?: return set
-        try {
-            val root = JSONObject(raw)
-            val net = root.optJSONObject("network_rules") ?: return set
-            val arr = net.optJSONArray("blocked_ips") ?: return set
-            for (i in 0 until arr.length()) {
-                set.add(arr.getString(i))
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        return set
+        ensureMemLoaded()
+        return memBlockedIps
     }
 
     fun getActiveWaivers(): List<ActiveWaiverItem> {
-        val list = mutableListOf<ActiveWaiverItem>()
-        val raw = prefs.getString("cached_policy_json", null) ?: return list
-        try {
-            val root = JSONObject(raw)
-            val arr = root.optJSONArray("active_waivers") ?: return list
-            for (i in 0 until arr.length()) {
-                val obj = arr.getJSONObject(i)
-                list.add(
-                    ActiveWaiverItem(
-                        targetType = obj.optString("target_type", "app").lowercase(),
-                        target = obj.optString("target").lowercase(),
-                        expiresAtEpochMs = obj.optLong("expires_at_epoch_ms", 0L)
-                    )
-                )
+        ensureMemLoaded()
+        return memActiveWaivers
+    }
+
+    /**
+     * Checks locally cached domain policy including emergency waivers (0ms offline-capable).
+     */
+    fun isDomainBlockedWithWaiver(domain: String): Boolean {
+        val norm = domain.lowercase().trim('.')
+        if (norm.isEmpty()) return false
+
+        val nowUtc = System.currentTimeMillis()
+        for (w in getActiveWaivers()) {
+            if (w.targetType == "domain") {
+                val wt = w.target.lowercase().trim('.')
+                if (norm == wt || norm.endsWith(".$wt")) {
+                    if (w.expiresAtEpochMs > nowUtc) {
+                        return false
+                    }
+                }
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
         }
-        return list
+
+        return DnsPacketUtil.isDomainBlocked(norm, getBlockedDomains(), getAllowedDomains())
     }
 
     /**

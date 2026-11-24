@@ -74,6 +74,7 @@ class MainActivity : FlutterActivity() {
                     val status = mapOf(
                         "vpnConsent" to (VpnService.prepare(this) == null),
                         "isProtectionRunning" to VyronVpnService.isServiceRunning,
+                        "isDefaultBrowser" to isDefaultBrowser(),
                         "usageAccess" to hasUsageStatsPermission(),
                         "overlay" to (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Settings.canDrawOverlays(this) else true),
                         "accessibility" to isAccessibilityServiceEnabled(),
@@ -177,8 +178,68 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
+                "openSafeBrowser" -> {
+                    val url = call.argument<String>("url") ?: "https://www.google.com"
+                    val browserIntent = Intent(this, VyronBrowserActivity::class.java).apply {
+                        data = Uri.parse(url)
+                    }
+                    startActivity(browserIntent)
+                    result.success(true)
+                }
+
+                "openDefaultAppsSettings" -> {
+                    try {
+                        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                            Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)
+                        } else {
+                            Intent(Settings.ACTION_SETTINGS)
+                        }.apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                        startActivity(intent)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        startActivity(Intent(Settings.ACTION_SETTINGS).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK })
+                        result.success(true)
+                    }
+                }
+
+                "openVpnSettings" -> {
+                    try {
+                        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                            Intent(Settings.ACTION_VPN_SETTINGS)
+                        } else {
+                            Intent(Settings.ACTION_WIRELESS_SETTINGS)
+                        }.apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                        startActivity(intent)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        startActivity(Intent(Settings.ACTION_SETTINGS).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK })
+                        result.success(true)
+                    }
+                }
+
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::policyStore.isInitialized) {
+            VyronPolicySyncManager.syncIfDueAsync(this, 15000L)
+        }
+    }
+
+    private fun isDefaultBrowser(): Boolean {
+        return try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com"))
+            val ri = packageManager.resolveActivity(intent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
+            ri?.activityInfo?.packageName == packageName
+        } catch (_: Exception) {
+            false
         }
     }
 
@@ -240,10 +301,9 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun isAccessibilityServiceEnabled(): Boolean {
-        val expected = "$packageName/${VyronAppGuardService::class.java.canonicalName}"
         val enabledServices = Settings.Secure.getString(contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES)
             ?: return false
-        return enabledServices.contains(expected)
+        return enabledServices.contains("VyronAppGuardService")
     }
 
     private fun isDeviceAdminActive(): Boolean {

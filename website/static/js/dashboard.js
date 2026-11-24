@@ -824,6 +824,15 @@ function copyPairingKey() {
   }
 }
 
+function copyDohLink() {
+  const url = document.getElementById('dns-doh-display')?.textContent?.trim() || `${window.location.origin}/dns-query`;
+  navigator.clipboard.writeText(url).then(() => {
+    showToast('Secure DoH DNS Link copied! Paste into Chrome/Edge Settings.', 'success');
+  }).catch(() => {
+    showToast(`DoH URL: ${url}`, 'info');
+  });
+}
+
 function copyPrivateDns() {
   const host = document.getElementById('dns-hostname-display')?.textContent?.trim() || '127.0.0.1';
   navigator.clipboard.writeText(host).then(() => {
@@ -838,6 +847,10 @@ async function fetchDnsInfo() {
     const res = await fetch('/api/dns/info');
     if (res.ok) {
       const data = await res.json();
+      const dohEl = document.getElementById('dns-doh-display');
+      if (dohEl) {
+        dohEl.textContent = data.doh_url || `${window.location.origin}/dns-query`;
+      }
       const el = document.getElementById('dns-hostname-display');
       if (el) {
         el.textContent = data.wifi_dns_ip || data.server_ip || '127.0.0.1';

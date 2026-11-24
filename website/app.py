@@ -334,18 +334,18 @@ def auth_me():
 def dns_info():
     """Provides DNS configuration details for the supervisor and Android device."""
     server_ip = get_local_ip()
-    port = int(os.getenv("PORT", 5000))
+    base_url = request.host_url.rstrip("/")
+    doh_url = f"{base_url}/dns-query"
     return jsonify({
         "server_ip": server_ip,
         "wifi_dns_ip": server_ip,
-        "private_dns_hostname": "vyron.dns",
+        "doh_url": doh_url,
         "dot_port": 853,
         "udp_dns_port": 53,
-        "doh_url": f"http://{server_ip}:{port}/dns-query",
         "instructions": {
-            "android_wifi_dns": f"Settings -> Wi-Fi -> [Network] -> Advanced -> Static IP -> DNS 1: {server_ip}",
-            "android_private_dns": "Requires registered public domain with CA-signed TLS. For local zero-icon blocking, use Wi-Fi DNS 1 above or In-App Shield.",
-            "browser_secure_dns": f"Chrome Settings -> Privacy -> Use Secure DNS -> Custom: http://{server_ip}:{port}/dns-query"
+            "browser_secure_dns": doh_url,
+            "android_wifi_dns": server_ip,
+            "note": "Use DoH link in Chrome / Edge / Brave for zero-icon blocking on any network, or Wi-Fi DNS IP for home Wi-Fi."
         }
     }), 200
 

@@ -20,6 +20,7 @@ import kotlin.concurrent.thread
 class BlockedOverlayActivity : Activity() {
 
     private lateinit var policyStore: PolicyStore
+    private var targetType: String = "app"
     private var packageName: String = ""
     private var appName: String = ""
     private var blockReason: String = ""
@@ -30,12 +31,24 @@ class BlockedOverlayActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         policyStore = PolicyStore(this)
+        loadExtras(intent)
+        buildView()
+    }
 
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        if (intent != null) {
+            setIntent(intent)
+            loadExtras(intent)
+            buildView()
+        }
+    }
+
+    private fun loadExtras(intent: Intent) {
+        targetType = intent.getStringExtra("EXTRA_TARGET_TYPE") ?: "app"
         packageName = intent.getStringExtra("EXTRA_PACKAGE_NAME") ?: ""
         appName = intent.getStringExtra("EXTRA_APP_NAME") ?: packageName
         blockReason = intent.getStringExtra("EXTRA_REASON") ?: "Restricted by VYRON policy"
-
-        buildView()
     }
 
     private fun buildView() {
@@ -202,11 +215,11 @@ class BlockedOverlayActivity : Activity() {
                 conn.setRequestProperty("Content-Type", "application/json")
                 conn.setRequestProperty("X-VYRON-TOKEN", token)
                 conn.doOutput = true
-                conn.connectTimeout = 6000
-                conn.readTimeout = 6000
+                conn.connectTimeout = 35000
+                conn.readTimeout = 35000
 
                 val payload = JSONObject().apply {
-                    put("target_type", "app")
+                    put("target_type", targetType)
                     put("target", packageName)
                     put("display_name", appName)
                     put("duration_minutes", 10)
@@ -253,8 +266,8 @@ class BlockedOverlayActivity : Activity() {
                         val conn = url.openConnection() as HttpURLConnection
                         conn.requestMethod = "GET"
                         conn.setRequestProperty("X-VYRON-TOKEN", token)
-                        conn.connectTimeout = 4000
-                        conn.readTimeout = 4000
+                        conn.connectTimeout = 20000
+                        conn.readTimeout = 20000
 
                         if (conn.responseCode == 200) {
                             val resp = conn.inputStream.bufferedReader().use { it.readText() }
@@ -262,8 +275,8 @@ class BlockedOverlayActivity : Activity() {
                             val status = json.optString("status")
 
                             if (status == "APPROVED") {
-                                // Sync latest policy
-                                fetchAndSavePolicy(serverUrl, token)
+                                // Sync latest policy cleanly through shared sync manager
+                                VyronPolicySyncManager.performSyncBlocking(this@BlockedOverlayActivity)
                                 handler.post {
                                     feedbackView.setTextColor(Color.parseColor("#34d399"))
                                     feedbackView.text = "Waiver Approved! Resuming application..."
@@ -286,21 +299,6 @@ class BlockedOverlayActivity : Activity() {
             }
         }
         handler.postDelayed(pollRunnable!!, 2000)
-    }
-
-    private fun fetchAndSavePolicy(serverUrl: String, token: String) {
-        try {
-            val url = URL("$serverUrl/api/device/policy")
-            val conn = url.openConnection() as HttpURLConnection
-            conn.requestMethod = "GET"
-            conn.setRequestProperty("X-VYRON-TOKEN", token)
-            if (conn.responseCode == 200) {
-                val body = conn.inputStream.bufferedReader().use { it.readText() }
-                policyStore.saveFullPolicyJson(body)
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
     }
 
     private fun goHome() {

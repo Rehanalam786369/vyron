@@ -1,7 +1,4 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
 import '../services/api_service.dart';
 import '../services/native_bridge.dart';
 import 'pairing_screen.dart';
@@ -19,7 +16,6 @@ class _StatusScreenState extends State<StatusScreen> {
   Map<String, int> _usage = {};
   bool _isLoading = false;
   bool _isProtectionRunning = false;
-  String _wifiDnsIp = '10.101.172.157';
   final _testDomainController = TextEditingController(text: 'instagram.com');
   String? _dnsTestResult;
   bool _isTestingDns = false;
@@ -40,11 +36,14 @@ class _StatusScreenState extends State<StatusScreen> {
     setState(() => _isLoading = true);
     await _checkPermissions();
     await _fetchPolicyAndUsage();
-    setState(() => _isLoading = false);
+    if (mounted) {
+      setState(() => _isLoading = false);
+    }
   }
 
   Future<void> _checkPermissions() async {
     final perms = await NativeBridge.getPermissionStatus();
+    if (!mounted) return;
     setState(() {
       _permissions = perms;
       _isProtectionRunning = perms['isProtectionRunning'] == true;
@@ -52,54 +51,47 @@ class _StatusScreenState extends State<StatusScreen> {
   }
 
   Future<void> _fetchPolicyAndUsage() async {
+    // 1. Load locally cached policy immediately (0ms, works offline & when server is slow)
+    final cachedPol = await ApiService.getCachedPolicy();
+    final usageStats = await NativeBridge.getTodayUsageStats();
+    if (cachedPol.isNotEmpty && mounted) {
+      setState(() {
+        _policy = cachedPol;
+        _usage = usageStats;
+      });
+    }
+
+    // 2. Fetch fresh rules from remote control panel quietly in background
     try {
       final pol = await ApiService.fetchPolicy();
       final serverUrl = await ApiService.getServerUrl();
       final token = await ApiService.getDeviceToken();
-      final usageStats = await NativeBridge.getTodayUsageStats();
       await NativeBridge.syncPolicyToNative(pol, serverUrl: serverUrl, deviceToken: token);
 
-      try {
-        final dnsUri = Uri.parse('$serverUrl/api/dns/info');
-        final res = await http.get(dnsUri).timeout(const Duration(seconds: 4));
-        if (res.statusCode == 200) {
-          final data = jsonDecode(res.body);
-          if (data['wifi_dns_ip'] != null) {
-            _wifiDnsIp = data['wifi_dns_ip'];
-          } else if (data['server_ip'] != null) {
-            _wifiDnsIp = data['server_ip'];
-          }
-        }
-      } catch (_) {}
-
+      if (!mounted) return;
       setState(() {
         _policy = pol;
         _usage = usageStats;
       });
-    } catch (e) {
-      // offline or server error
+    } catch (_) {
+      // Offline or slow server wake-up; cached policy stays enforced locally!
     }
-  }
-
-  void _copyWifiDns() {
-    Clipboard.setData(ClipboardData(text: _wifiDnsIp));
-    _showSnackbar('Wi-Fi DNS IP ($_wifiDnsIp) copied! Paste into Wi-Fi Advanced -> DNS 1.');
   }
 
   Future<void> _toggleProtection() async {
     if (_isProtectionRunning) {
       await NativeBridge.stopProtection();
       setState(() => _isProtectionRunning = false);
-      _showSnackbar('In-App Shield stopped. Use Wi-Fi DNS for zero-icon protection.');
+      _showSnackbar('On-Phone Default DNS paused. Default Browser & App Guard remain active.');
     } else {
       try {
         final success = await NativeBridge.startProtection();
         if (success) {
           setState(() => _isProtectionRunning = true);
-          _showSnackbar('In-App Shield activated! Blocking active on Wi-Fi & Mobile Data.');
+          _showSnackbar('On-Phone Default DNS Engine activated for ALL browsers & apps!');
         }
       } catch (e) {
-        _showSnackbar('Could not start shield: $e', isError: true);
+        _showSnackbar('Could not start on-phone DNS engine: $e', isError: true);
       }
     }
   }
@@ -302,20 +294,137 @@ class _StatusScreenState extends State<StatusScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Protection Mode Status Banner
+              // CARD 1 (PRIMARY): ZERO-ICON COMFORT GUARD (APP LOCKS + CHROME/BROWSER URL GUARD)
               Container(
                 padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
-                    colors: _isProtectionRunning
-                        ? [const Color(0xFF065F46), const Color(0xFF0F172A)]
-                        : [const Color(0xFF0C4A6E), const Color(0xFF0F172A)],
+                    colors: (_permissions['accessibility'] == true)
+                        ? [const Color(0xFF064E3B), const Color(0xFF0F172A)]
+                        : [const Color(0xFF4C1D95), const Color(0xFF0F172A)],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
-                    color: _isProtectionRunning ? const Color(0xFF10B981) : const Color(0xFF0284C7),
+                    color: (_permissions['accessibility'] == true)
+                        ? const Color(0xFF10B981)
+                        : const Color(0xFFA855F7),
+                  ),
+                  boxShadow: [
+                    BoxShadow(color: Colors.black.withAlpha(120), blurRadius: 15)
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.verified_user,
+                              size: 20,
+                              color: (_permissions['accessibility'] == true)
+                                  ? const Color(0xFF34D399)
+                                  : const Color(0xFFC084FC),
+                            ),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'ZERO-ICON GUARD',
+                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 1),
+                            ),
+                          ],
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: (_permissions['accessibility'] == true)
+                                ? const Color(0x3310B981)
+                                : const Color(0x33F59E0B),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            (_permissions['accessibility'] == true) ? 'NO VPN ICON • ACTIVE' : 'SETUP REQUIRED',
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w800,
+                              color: (_permissions['accessibility'] == true)
+                                  ? const Color(0xFF34D399)
+                                  : const Color(0xFFFBBF24),
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Blocks restricted apps AND restricted websites inside Chrome, Brave, Edge, Firefox, Samsung Internet, Opera & VYRON Browser cleanly—with ZERO status bar icons, ZERO offline popups, and 0ms local lookup.',
+                      style: TextStyle(fontSize: 12, color: Color(0xFFE2E8F0), height: 1.4),
+                    ),
+                    const SizedBox(height: 12),
+                    if (_permissions['accessibility'] != true) ...[
+                      ElevatedButton.icon(
+                        icon: const Icon(Icons.security, size: 16),
+                        label: const Text('Enable Zero-Icon Guard (1-Tap)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                        onPressed: () => NativeBridge.openPermissionSettings('accessibility'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF7E22CE),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                      ),
+                    ] else ...[
+                      Row(
+                        children: [
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              icon: const Icon(Icons.open_in_browser, size: 15),
+                              label: const Text('VYRON Browser', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                              onPressed: () => NativeBridge.openSafeBrowser(),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF059669),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 11),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              icon: const Icon(Icons.settings_applications, size: 15, color: Color(0xFF34D399)),
+                              label: Text(
+                                _permissions['isDefaultBrowser'] == true ? 'Default Set ✓' : 'Set Default Browser',
+                                style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                              ),
+                              onPressed: NativeBridge.openDefaultAppsSettings,
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: Color(0xFF10B981)),
+                                padding: const EdgeInsets.symmetric(vertical: 11),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // CARD 2 (OPTIONAL FALLBACK): ON-DEVICE PACKET DNS ENGINE (VPN)
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0F172A),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: _isProtectionRunning ? const Color(0xFF38BDF8) : const Color(0xFF334155),
                   ),
                 ),
                 child: Column(
@@ -324,219 +433,71 @@ class _StatusScreenState extends State<StatusScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          _isProtectionRunning ? 'IN-APP SHIELD: ACTIVE' : 'WI-FI DNS MODE: READY',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 1,
-                            color: _isProtectionRunning ? const Color(0xFF34D399) : const Color(0xFF38BDF8),
-                            fontFamily: 'monospace',
-                          ),
-                        ),
-                        Container(
-                          width: 10,
-                          height: 10,
-                          decoration: BoxDecoration(
-                            color: _isProtectionRunning ? const Color(0xFF10B981) : const Color(0xFF38BDF8),
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      _isProtectionRunning
-                          ? 'Device-wide DNS blocking active across Wi-Fi and Mobile Data.\n100% local split-tunnel • Zero lag'
-                          : 'Zero-Icon Privacy Protection\nNo VPN icon on status bar • 100% native phone speed',
-                      style: const TextStyle(fontSize: 13, color: Colors.white, height: 1.4),
-                    ),
-                    const SizedBox(height: 12),
-                    ElevatedButton.icon(
-                      icon: Icon(_isProtectionRunning ? Icons.shield_outlined : Icons.shield, size: 16),
-                      label: Text(
-                        _isProtectionRunning ? 'Turn Off In-App Shield' : 'Turn On In-App Shield (Mobile Data)',
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                      ),
-                      onPressed: _toggleProtection,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _isProtectionRunning ? const Color(0xFF991B1B) : const Color(0xFF0284C7),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // METHOD 1: WI-FI DNS SETUP (ZERO VPN ICON)
-              Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF0F172A),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0x6638BDF8)),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withAlpha(120),
-                      blurRadius: 15,
-                    )
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(
+                        const Row(
                           children: [
-                            Icon(Icons.wifi, size: 20, color: Color(0xFF38BDF8)),
+                            Icon(Icons.dns, size: 18, color: Color(0xFF38BDF8)),
                             SizedBox(width: 8),
                             Text(
-                              'METHOD 1: WI-FI DNS',
-                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 1),
+                              'DEEP DNS SHIELD (OPTIONAL VPN)',
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 0.8),
                             ),
                           ],
                         ),
-                        Text(
-                          'NO VPN ICON',
-                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Color(0xFF34D399), fontFamily: 'monospace'),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: _isProtectionRunning ? const Color(0x3338BDF8) : const Color(0x3364748B),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            _isProtectionRunning ? 'ACTIVE' : 'OFF (NO ICON)',
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold,
+                              color: _isProtectionRunning ? const Color(0xFF38BDF8) : const Color(0xFF34D399),
+                              fontFamily: 'monospace',
+                            ),
+                          ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 6),
                     const Text(
-                      'Configure Wi-Fi DNS on your phone to block instagram.com and restricted sites directly without showing any VPN key icon.',
-                      style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8), height: 1.3),
+                      'Optional full-device packet DNS filter for background non-browser apps (uses local cache, online & offline). Note: Android OS displays a status-bar key icon whenever active.',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8), height: 1.35),
                     ),
-                    const SizedBox(height: 12),
-
-                    // Wi-Fi DNS IP Box
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF070A12),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0x4D38BDF8)),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('DNS 1 SERVER IP', style: TextStyle(fontSize: 9, color: Color(0xFF64748B), fontWeight: FontWeight.bold)),
-                              Text(
-                                _wifiDnsIp,
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF38BDF8),
-                                  fontFamily: 'monospace',
-                                  letterSpacing: 1,
-                                ),
-                              ),
-                            ],
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.copy, size: 18, color: Color(0xFF38BDF8)),
-                            onPressed: _copyWifiDns,
-                            tooltip: 'Copy DNS IP',
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
+                    const SizedBox(height: 10),
                     Row(
                       children: [
                         Expanded(
                           child: ElevatedButton.icon(
-                            icon: const Icon(Icons.copy, size: 16),
-                            label: const Text('1. Copy DNS IP', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                            onPressed: _copyWifiDns,
+                            icon: Icon(_isProtectionRunning ? Icons.pause_circle : Icons.shield_outlined, size: 15),
+                            label: Text(
+                              _isProtectionRunning ? 'Turn Off VPN (Hide Icon)' : 'Turn On Deep DNS VPN',
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                            ),
+                            onPressed: _toggleProtection,
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF0284C7),
+                              backgroundColor: _isProtectionRunning ? const Color(0xFF991B1B) : const Color(0xFF1E293B),
                               foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              side: BorderSide(color: _isProtectionRunning ? const Color(0xFFEF4444) : const Color(0xFF475569)),
+                              padding: const EdgeInsets.symmetric(vertical: 10),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                             ),
                           ),
                         ),
                         const SizedBox(width: 8),
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            icon: const Icon(Icons.wifi_find, size: 16, color: Color(0xFF38BDF8)),
-                            label: const Text('2. Wi-Fi Settings', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-                            onPressed: NativeBridge.openWifiSettings,
-                            style: OutlinedButton.styleFrom(
-                              side: const BorderSide(color: Color(0xFF0284C7)),
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            ),
+                        OutlinedButton.icon(
+                          icon: const Icon(Icons.lock_clock, size: 14, color: Color(0xFF94A3B8)),
+                          label: const Text('Always-On', style: TextStyle(color: Colors.white, fontSize: 11)),
+                          onPressed: NativeBridge.openVpnSettings,
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: Color(0xFF334155)),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                           ),
                         ),
                       ],
-                    ),
-                    const SizedBox(height: 10),
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF0B132B),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'HOW TO CONFIGURE ON ANDROID:',
-                            style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF38BDF8)),
-                          ),
-                          SizedBox(height: 4),
-                          Text(
-                            '1. In Android Settings -> Private DNS: Set to "Automatic" or "Off".\n'
-                            '2. Open Wi-Fi Settings -> Tap (⚙️) gear or pencil on your Wi-Fi.\n'
-                            '3. Advanced options -> Change IP Settings from DHCP to Static.\n'
-                            '4. Paste the DNS 1 IP above and tap Save.',
-                            style: TextStyle(fontSize: 11, color: Color(0xFFCBD5E1), height: 1.4),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    InkWell(
-                      onTap: () {
-                        showDialog(
-                          context: context,
-                          builder: (ctx) => AlertDialog(
-                            backgroundColor: const Color(0xFF0F172A),
-                            title: const Text('Why Private DNS Says "Failed to Connect"', style: TextStyle(color: Colors.white, fontSize: 15)),
-                            content: const Text(
-                              'Android\'s "Private DNS" setting (DoT) strictly requires a registered, public internet domain with a public CA-signed SSL certificate.\n\n'
-                              'Android OS rejects local hostnames (like vyron.dns) and raw IP addresses in the Private DNS field.\n\n'
-                              'Method 1 (Wi-Fi DNS) or the In-App Shield avoids this entirely and gives you instant blocking without needing any domain!',
-                              style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13, height: 1.4),
-                            ),
-                            actions: [
-                              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Understood')),
-                            ],
-                          ),
-                        );
-                      },
-                      child: const Row(
-                        children: [
-                          Icon(Icons.info_outline, size: 14, color: Color(0xFF38BDF8)),
-                          SizedBox(width: 4),
-                          Text(
-                            'Why did Private DNS say "failed to connect"?',
-                            style: TextStyle(fontSize: 11, color: Color(0xFF38BDF8), decoration: TextDecoration.underline),
-                          ),
-                        ],
-                      ),
                     ),
                   ],
                 ),

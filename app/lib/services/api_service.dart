@@ -61,7 +61,7 @@ class ApiService {
             'device_model': deviceModel.trim(),
           }),
         )
-        .timeout(const Duration(seconds: 10));
+        .timeout(const Duration(seconds: 60));
 
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     if (response.statusCode == 200) {
@@ -91,7 +91,7 @@ class ApiService {
           },
           body: jsonEncode({'apps': apps}),
         )
-        .timeout(const Duration(seconds: 15));
+        .timeout(const Duration(seconds: 60));
 
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -101,7 +101,20 @@ class ApiService {
     }
   }
 
-  // 3. Fetch Latest Governance Policy
+  static const String keyCachedPolicy = 'vyron_cached_policy_json';
+
+  static Future<Map<String, dynamic>> getCachedPolicy() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(keyCachedPolicy);
+    if (raw == null || raw.isEmpty) return {};
+    try {
+      return jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      return {};
+    }
+  }
+
+  // 3. Fetch Latest Governance Policy (caches on-device for offline/0ms DNS)
   static Future<Map<String, dynamic>> fetchPolicy() async {
     final cleanUrl = await getServerUrl();
     final token = await getDeviceToken();
@@ -113,9 +126,11 @@ class ApiService {
           uri,
           headers: {'X-VYRON-TOKEN': token},
         )
-        .timeout(const Duration(seconds: 10));
+        .timeout(const Duration(seconds: 60));
 
     if (response.statusCode == 200) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(keyCachedPolicy, response.body);
       return jsonDecode(response.body) as Map<String, dynamic>;
     } else {
       throw Exception('Policy fetch failed: ${response.statusCode}');
@@ -150,7 +165,7 @@ class ApiService {
             'reason': reason,
           }),
         )
-        .timeout(const Duration(seconds: 10));
+        .timeout(const Duration(seconds: 60));
 
     if (response.statusCode == 201) {
       return jsonDecode(response.body) as Map<String, dynamic>;

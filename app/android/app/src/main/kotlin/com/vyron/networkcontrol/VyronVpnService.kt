@@ -4,7 +4,6 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.app.usage.UsageStatsManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -13,21 +12,22 @@ import android.net.ConnectivityManager
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
-import org.json.JSONArray
-import org.json.JSONObject
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.io.OutputStreamWriter
-import java.net.DatagramPacket
-import java.net.DatagramSocket
-import java.net.HttpURLConnection
-import java.net.InetAddress
-import java.net.URL
 import java.nio.ByteBuffer
-import java.util.Calendar
-import java.util.Collections
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import kotlin.concurrent.thread
 
+/**
+ * Dual-Stack Split-Tunnel On-Phone Default DNS Firewall.
+ *
+ * Forces all browsers (Chrome, Brave, Firefox, Edge, Opera, Samsung Internet) and apps
+ * across both IPv4 & IPv6 to use VYRON's local cached DNS engine on-device:
+ * - Zero dependency on remote control-panel speed during web browsing
+ * - Works online and offline using cached rules in PolicyStore
+ * - Blocks DoH/DoT bypasses so no browser can circumvent filtering
+ */
 class VyronVpnService : VpnService() {
 
     companion object {
@@ -37,15 +37,19 @@ class VyronVpnService : VpnService() {
 
     private lateinit var policyStore: PolicyStore
     private var vpnInterface: ParcelFileDescriptor? = null
+
+    @Volatile
     private var isRunning = false
-    private val batchedLogs = Collections.synchronizedList(mutableListOf<JSONObject>())
     private var lastBlockedIps = setOf<String>()
     private var localDnsServer: VyronLocalDnsServer? = null
+    private var dnsExecutor: ExecutorService? = null
+    private val outWriteLock = Any()
 
     private val policyUpdateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == "com.vyron.ACTION_POLICY_UPDATED") {
                 lastBlockedIps = policyStore.getBlockedIps()
+                localDnsServer?.clearCache()
             }
         }
     }
@@ -63,6 +67,7 @@ class VyronVpnService : VpnService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "ACTION_STOP") {
+            policyStore.autoStartVpn = false
             stopVpn()
             return START_NOT_STICKY
         }
@@ -77,10 +82,10 @@ class VyronVpnService : VpnService() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 channelId,
-                "VYRON Network Shield",
+                "VYRON On-Phone Default DNS",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Zero-lag split-tunnel network protection"
+                description = "On-device DNS filtering for all browsers and apps"
             }
             val nm = getSystemService(NotificationManager::class.java)
             nm?.createNotificationChannel(channel)
@@ -96,16 +101,16 @@ class VyronVpnService : VpnService() {
 
         val notification: Notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, channelId)
-                .setContentTitle("VYRON Shield Active")
-                .setContentText("Zero-lag DNS enforcement enabled")
+                .setContentTitle("VYRON Default DNS Active")
+                .setContentText("On-device DNS protection across all browsers (online & offline)")
                 .setSmallIcon(android.R.drawable.ic_secure)
                 .setContentIntent(pendingIntent)
                 .build()
         } else {
             @Suppress("DEPRECATION")
             Notification.Builder(this)
-                .setContentTitle("VYRON Shield Active")
-                .setContentText("Zero-lag DNS enforcement enabled")
+                .setContentTitle("VYRON Default DNS Active")
+                .setContentText("On-device DNS protection across all browsers")
                 .setSmallIcon(android.R.drawable.ic_secure)
                 .setContentIntent(pendingIntent)
                 .build()
@@ -117,74 +122,97 @@ class VyronVpnService : VpnService() {
     private fun startVpn() {
         if (isRunning) return
         isRunning = true
+        policyStore.autoStartVpn = true
 
         val blockedIps = policyStore.getBlockedIps()
         lastBlockedIps = blockedIps
 
         val builder = Builder().apply {
-            setSession("VYRON Zero-Lag Shield")
-            // Virtual TUN interface address
-            addAddress("10.0.0.1", 32)
-            // Virtual DNS server inside the TUN
-            addDnsServer("10.0.0.2")
+            setSession("VYRON Default DNS")
 
-            // 1. Route virtual DNS into TUN
+            // 1. IPv4 Virtual TUN & Virtual DNS
+            addAddress("10.0.0.1", 32)
+            addDnsServer("10.0.0.2")
             addRoute("10.0.0.2", 32)
 
-            // 2. Discover active network's Wi-Fi / DHCP / cellular DNS servers and route them into TUN
+            // 2. IPv6 Virtual TUN & Virtual DNS (closes carrier/router IPv6 DNS bypasses)
+            try {
+                addAddress("fd00::1", 128)
+                addDnsServer("fd00::2")
+                addRoute("fd00::2", 128)
+            } catch (_: Exception) {
+            }
+
+            // 3. Route active Wi-Fi / Cellular DNS servers (IPv4 & IPv6) into TUN
             try {
                 val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-                val activeNetwork = cm?.activeNetwork
-                val linkProps = cm?.getLinkProperties(activeNetwork)
+                val activeNet = cm?.activeNetwork
+                val linkProps = cm?.getLinkProperties(activeNet)
                 linkProps?.dnsServers?.forEach { inetAddr ->
-                    val ip = inetAddr.hostAddress
-                    if (ip != null && !ip.contains(":") && ip != "127.0.0.1" && ip != "10.0.0.1") {
+                    val ip = inetAddr.hostAddress ?: return@forEach
+                    if (ip != "127.0.0.1" && ip != "::1" && ip != "10.0.0.1" && ip != "fd00::1") {
                         try {
-                            addRoute(ip, 32)
-                        } catch (e: Exception) {
-                            e.printStackTrace()
+                            val cleanIp = ip.substringBefore('%')
+                            val prefix = if (cleanIp.contains(':')) 128 else 32
+                            addRoute(cleanIp, prefix)
+                        } catch (_: Exception) {
                         }
                     }
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
+            } catch (_: Exception) {
             }
 
-            // 3. Route standard public DNS servers so direct queries (8.8.8.8, 1.1.1.1, etc.) cannot bypass
-            val publicDnsIps = listOf(
+            // 4. Route standard public DNS/DoH/DoT IPs into TUN to prevent browser bypasses
+            val publicIpv4Dns = listOf(
                 "8.8.8.8", "8.8.4.4",
                 "1.1.1.1", "1.0.0.1",
                 "9.9.9.9", "149.112.112.112",
                 "208.67.222.222", "208.67.220.220",
                 "94.140.14.14", "94.140.15.15"
             )
-            for (dnsIp in publicDnsIps) {
+            for (dnsIp in publicIpv4Dns) {
                 try {
                     addRoute(dnsIp, 32)
-                } catch (e: Exception) {
-                    e.printStackTrace()
+                } catch (_: Exception) {
                 }
             }
 
-            // 4. Route explicitly blocked IPs into the TUN so they are dropped
+            val publicIpv6Dns = listOf(
+                "2001:4860:4860::8888", "2001:4860:4860::8844",
+                "2606:4700:4700::1111", "2606:4700:4700::1001",
+                "2620:fe::fe", "2620:fe::9",
+                "2a10:50c0::ad1:ff", "2a10:50c0::ad2:ff"
+            )
+            for (dnsIp6 in publicIpv6Dns) {
+                try {
+                    addRoute(dnsIp6, 128)
+                } catch (_: Exception) {
+                }
+            }
+
+            // 5. Route explicitly blocked IPv4/IPv6 targets into TUN so direct IP access drops
             for (ip in blockedIps) {
                 try {
-                    addRoute(ip, 32)
-                } catch (e: Exception) {
-                    e.printStackTrace()
+                    val prefix = if (ip.contains(':')) 128 else 32
+                    addRoute(ip, prefix)
+                } catch (_: Exception) {
                 }
             }
 
-            // 5. Exclude VYRON app traffic to prevent sync loops
+            // 6. Exclude VYRON app itself so background sync to Render never loops
             try {
                 addDisallowedApplication(packageName)
-            } catch (e: Exception) {
-                e.printStackTrace()
+            } catch (_: Exception) {
             }
         }
 
         try {
             vpnInterface = builder.establish()
+            if (vpnInterface == null) {
+                isServiceRunning = false
+                stopVpn()
+                return
+            }
             isServiceRunning = true
         } catch (e: Exception) {
             e.printStackTrace()
@@ -193,20 +221,15 @@ class VyronVpnService : VpnService() {
             return
         }
 
-        // Start embedded in-app DNS server
-        try {
-            localDnsServer = VyronLocalDnsServer(this, policyStore)
-            localDnsServer?.start()
-        } catch (e: Exception) {
-            e.printStackTrace()
+        localDnsServer = VyronLocalDnsServer(this, policyStore).apply {
+            start(1053)
         }
+        dnsExecutor = Executors.newFixedThreadPool(8)
 
-        // Start packet routing worker thread
         thread(name = "VyronVpnPacketThread") {
             runPacketLoop()
         }
 
-        // Start gentle 15-second background sync thread
         thread(name = "VyronVpnSyncThread") {
             runSyncLoop()
         }
@@ -218,309 +241,113 @@ class VyronVpnService : VpnService() {
         val outStream = FileOutputStream(pfd.fileDescriptor)
         val packet = ByteBuffer.allocate(32767)
 
-        val upstreamDns = InetAddress.getByName("1.1.1.1")
-        val upstreamSocket = DatagramSocket()
-        protect(upstreamSocket)
-        upstreamSocket.soTimeout = 2500
-
         while (isRunning) {
             try {
                 packet.clear()
                 val length = inStream.read(packet.array())
                 if (length <= 0) continue
 
-                packet.limit(length)
-
-                // Inspect IPv4 Header (version 4 is (header[0] >> 4) == 4)
                 val firstByte = packet.get(0).toInt()
                 val version = (firstByte shr 4) and 0x0F
-                if (version != 4) continue
 
-                val headerLength = (firstByte and 0x0F) * 4
-                val protocol = packet.get(9).toInt() and 0xFF
+                if (version == 4 && length >= 28) {
+                    val headerLength = (firstByte and 0x0F) * 4
+                    if (headerLength < 20 || length < headerLength) continue
+                    val protocol = packet.get(9).toInt() and 0xFF
 
-                // Check destination IP
-                val destIp = String.format(
-                    "%d.%d.%d.%d",
-                    packet.get(16).toInt() and 0xFF,
-                    packet.get(17).toInt() and 0xFF,
-                    packet.get(18).toInt() and 0xFF,
-                    packet.get(19).toInt() and 0xFF
-                )
+                    val destIp = String.format(
+                        "%d.%d.%d.%d",
+                        packet.get(16).toInt() and 0xFF,
+                        packet.get(17).toInt() and 0xFF,
+                        packet.get(18).toInt() and 0xFF,
+                        packet.get(19).toInt() and 0xFF
+                    )
 
-                // If destination IP is in blocked IPs, drop packet and log
-                if (lastBlockedIps.contains(destIp)) {
-                    queueLog("ip", destIp, "BLOCKED", "Matched direct blocked IP policy ($destIp)")
-                    continue
-                }
+                    if (lastBlockedIps.contains(destIp)) {
+                        VyronPolicySyncManager.queueLog("ip", destIp, "BLOCKED", "Matched direct blocked IP ($destIp)")
+                        continue
+                    }
 
-                // If UDP packet (protocol 17)
-                if (protocol == 17 && length > headerLength + 8) {
-                    val udpDestPort = ((packet.get(headerLength + 2).toInt() and 0xFF) shl 8) or
+                    if (protocol == 17 && length > headerLength + 8) {
+                        val udpDestPort = ((packet.get(headerLength + 2).toInt() and 0xFF) shl 8) or
                             (packet.get(headerLength + 3).toInt() and 0xFF)
-
-                    // If DNS query targeting port 53 (on 10.0.0.2 or any intercepted DNS server)
-                    if (udpDestPort == 53) {
-                        val dnsOffset = headerLength + 8
-                        val dnsLength = length - dnsOffset
-
-                        val dnsData = ByteArray(dnsLength)
-                        System.arraycopy(packet.array(), dnsOffset, dnsData, 0, dnsLength)
-
-                        val query = DnsPacketUtil.parseQuery(dnsData)
-
-                        if (query != null) {
-                            val isBlocked = isDomainBlocked(query.domain)
-
-                            if (isBlocked) {
-                                queueLog("domain", query.domain, "BLOCKED", "Blocked by VYRON DNS Policy (${query.domain})")
-                                val blockedResp = DnsPacketUtil.craftBlockedResponse(dnsData)
-                                val replyPacket = buildReplyUdpPacket(packet.array(), headerLength, blockedResp)
-                                outStream.write(replyPacket)
-                            } else {
-                                // Forward to upstream DNS via protected socket
-                                try {
-                                    val sendPacket = DatagramPacket(dnsData, dnsData.size, upstreamDns, 53)
-                                    upstreamSocket.send(sendPacket)
-
-                                    val respBuf = ByteArray(2048)
-                                    val recvPacket = DatagramPacket(respBuf, respBuf.size)
-                                    upstreamSocket.receive(recvPacket)
-
-                                    val realRespData = ByteArray(recvPacket.length)
-                                    System.arraycopy(recvPacket.data, 0, realRespData, 0, recvPacket.length)
-
-                                    val replyPacket = buildReplyUdpPacket(packet.array(), headerLength, realRespData)
-                                    outStream.write(replyPacket)
-                                } catch (e: Exception) {
-                                    // Upstream timeout or network hiccup
-                                }
-                            }
+                        if (udpDestPort == 53) {
+                            val rawCopy = ByteArray(length)
+                            System.arraycopy(packet.array(), 0, rawCopy, 0, length)
+                            dispatchDnsPacket(rawCopy, headerLength, isIpv6 = false, outStream = outStream)
+                        }
+                    }
+                    // Non-port-53 packets routed into TUN (e.g. DoT 853 or DoH 443 to 8.8.8.8/1.1.1.1) are dropped cleanly
+                } else if (version == 6 && length >= 48) {
+                    val nextHeader = packet.get(6).toInt() and 0xFF
+                    if (nextHeader == 17 && length > 48) {
+                        val udpDestPort = ((packet.get(42).toInt() and 0xFF) shl 8) or
+                            (packet.get(43).toInt() and 0xFF)
+                        if (udpDestPort == 53) {
+                            val rawCopy = ByteArray(length)
+                            System.arraycopy(packet.array(), 0, rawCopy, 0, length)
+                            dispatchDnsPacket(rawCopy, 40, isIpv6 = true, outStream = outStream)
                         }
                     }
                 }
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 if (!isRunning) break
             }
         }
-
-        try {
-            upstreamSocket.close()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
     }
 
-    private fun isDomainBlocked(domain: String): Boolean {
-        val norm = domain.lowercase().trim('.')
+    private fun dispatchDnsPacket(
+        origPacket: ByteArray,
+        ipHeaderLen: Int,
+        isIpv6: Boolean,
+        outStream: FileOutputStream
+    ) {
+        val dnsOffset = ipHeaderLen + 8
+        val dnsLen = origPacket.size - dnsOffset
+        if (dnsLen < 12) return
 
-        // 1. Check active waivers
-        val nowUtc = System.currentTimeMillis()
-        for (w in policyStore.getActiveWaivers()) {
-            if (w.targetType == "domain") {
-                val wt = w.target.lowercase().trim('.')
-                if (norm == wt || norm.endsWith(".$wt")) {
-                    if (w.expiresAtEpochMs > nowUtc) {
-                        return false // Waived
+        val dnsData = ByteArray(dnsLen)
+        System.arraycopy(origPacket, dnsOffset, dnsData, 0, dnsLen)
+
+        val exec = dnsExecutor ?: return
+        val dnsEngine = localDnsServer ?: return
+
+        exec.execute {
+            if (!isRunning) return@execute
+            val dnsResp = dnsEngine.resolveDnsQuery(dnsData) { sock ->
+                protect(sock)
+            } ?: return@execute
+
+            val replyPacket = if (isIpv6) {
+                DnsPacketUtil.buildReplyIpv6UdpPacket(origPacket, ipHeaderLen, dnsResp)
+            } else {
+                DnsPacketUtil.buildReplyIpv4UdpPacket(origPacket, ipHeaderLen, dnsResp)
+            }
+
+            synchronized(outWriteLock) {
+                if (isRunning) {
+                    try {
+                        outStream.write(replyPacket)
+                    } catch (_: Exception) {
                     }
                 }
             }
         }
-
-        // 2. Check allowed and blocked domains using DnsPacketUtil
-        val allowed = policyStore.getAllowedDomains()
-        val blocked = policyStore.getBlockedDomains()
-        return DnsPacketUtil.isDomainBlocked(norm, blocked, allowed)
-    }
-
-    private fun buildReplyUdpPacket(origIpPacket: ByteArray, ipHeaderLen: Int, dnsPayload: ByteArray): ByteArray {
-        val replyTotalLen = 20 + 8 + dnsPayload.size
-        val reply = ByteArray(replyTotalLen)
-
-        // IP Header
-        reply[0] = 0x45.toByte() // Version 4, IHL 5
-        reply[1] = 0x00.toByte()
-        reply[2] = ((replyTotalLen shr 8) and 0xFF).toByte()
-        reply[3] = (replyTotalLen and 0xFF).toByte()
-        reply[4] = 0x12.toByte() // ID
-        reply[5] = 0x34.toByte()
-        reply[6] = 0x40.toByte() // Don't fragment
-        reply[7] = 0x00.toByte()
-        reply[8] = 64.toByte()   // TTL
-        reply[9] = 17.toByte()   // Protocol UDP
-
-        // Swap IPs: Source becomes original Dest, Dest becomes original Source
-        reply[12] = origIpPacket[16]
-        reply[13] = origIpPacket[17]
-        reply[14] = origIpPacket[18]
-        reply[15] = origIpPacket[19]
-
-        reply[16] = origIpPacket[12]
-        reply[17] = origIpPacket[13]
-        reply[18] = origIpPacket[14]
-        reply[19] = origIpPacket[15]
-
-        // Compute IP checksum
-        var ipChecksum = 0
-        for (i in 0 until 10) {
-            if (i == 5) continue
-            val word = ((reply[i * 2].toInt() and 0xFF) shl 8) or (reply[i * 2 + 1].toInt() and 0xFF)
-            ipChecksum += word
-        }
-        while ((ipChecksum shr 16) > 0) {
-            ipChecksum = (ipChecksum and 0xFFFF) + (ipChecksum shr 16)
-        }
-        ipChecksum = ipChecksum.inv() and 0xFFFF
-        reply[10] = ((ipChecksum shr 8) and 0xFF).toByte()
-        reply[11] = (ipChecksum and 0xFF).toByte()
-
-        // UDP Header
-        // Swap Ports: Source is origDestPort, Dest is origSrcPort
-        reply[20] = origIpPacket[ipHeaderLen + 2]
-        reply[21] = origIpPacket[ipHeaderLen + 3]
-        reply[22] = origIpPacket[ipHeaderLen]
-        reply[23] = origIpPacket[ipHeaderLen + 1]
-
-        val udpLen = 8 + dnsPayload.size
-        reply[24] = ((udpLen shr 8) and 0xFF).toByte()
-        reply[25] = (udpLen and 0xFF).toByte()
-        reply[26] = 0x00.toByte() // Checksum optional in IPv4 UDP
-        reply[27] = 0x00.toByte()
-
-        // Copy DNS payload
-        System.arraycopy(dnsPayload, 0, reply, 28, dnsPayload.size)
-
-        return reply
-    }
-
-    private fun queueLog(eventType: String, target: String, status: String, reason: String) {
-        val obj = JSONObject().apply {
-            put("event_type", eventType)
-            put("target", target)
-            put("status", status)
-            put("reason", reason)
-        }
-        batchedLogs.add(obj)
     }
 
     private fun runSyncLoop() {
         while (isRunning) {
             try {
-                syncWithServer()
-            } catch (e: Exception) {
-                // Ignore sync network failure
+                VyronPolicySyncManager.performSyncBlocking(this)
+            } catch (_: Exception) {
             }
 
             try {
-                Thread.sleep(15000)
-            } catch (e: InterruptedException) {
+                Thread.sleep(30000)
+            } catch (_: InterruptedException) {
                 break
             }
         }
-    }
-
-    private fun syncWithServer() {
-        val serverUrl = policyStore.serverUrl.trimEnd('/')
-        val token = policyStore.deviceToken
-        if (token.isEmpty()) return
-
-        // 1. Fetch Latest Policy
-        try {
-            val url = URL("$serverUrl/api/device/policy")
-            val conn = url.openConnection() as HttpURLConnection
-            conn.requestMethod = "GET"
-            conn.setRequestProperty("X-VYRON-TOKEN", token)
-            conn.connectTimeout = 6000
-            conn.readTimeout = 6000
-
-            if (conn.responseCode == 200) {
-                val body = conn.inputStream.bufferedReader().use { it.readText() }
-                policyStore.saveFullPolicyJson(body)
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-
-        // 2. Upload Today's Usage Stats
-        try {
-            val usageList = collectTodayUsage()
-            if (usageList.length() > 0) {
-                val url = URL("$serverUrl/api/device/usage")
-                val conn = url.openConnection() as HttpURLConnection
-                conn.requestMethod = "POST"
-                conn.setRequestProperty("Content-Type", "application/json")
-                conn.setRequestProperty("X-VYRON-TOKEN", token)
-                conn.doOutput = true
-                conn.connectTimeout = 6000
-
-                val payload = JSONObject().apply { put("usage", usageList) }
-                OutputStreamWriter(conn.outputStream).use { it.write(payload.toString()) }
-                conn.responseCode
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-
-        // 3. Flush Batched Logs
-        if (batchedLogs.isNotEmpty()) {
-            val toSend = ArrayList<JSONObject>()
-            synchronized(batchedLogs) {
-                toSend.addAll(batchedLogs)
-                batchedLogs.clear()
-            }
-
-            if (toSend.isNotEmpty()) {
-                try {
-                    val url = URL("$serverUrl/api/device/logs")
-                    val conn = url.openConnection() as HttpURLConnection
-                    conn.requestMethod = "POST"
-                    conn.setRequestProperty("Content-Type", "application/json")
-                    conn.setRequestProperty("X-VYRON-TOKEN", token)
-                    conn.doOutput = true
-                    conn.connectTimeout = 6000
-
-                    val payload = JSONObject().apply {
-                        val arr = JSONArray()
-                        toSend.forEach { arr.put(it) }
-                        put("logs", arr)
-                    }
-                    OutputStreamWriter(conn.outputStream).use { it.write(payload.toString()) }
-                    conn.responseCode
-                } catch (e: Exception) {
-                    // Re-queue logs if failed
-                    batchedLogs.addAll(toSend)
-                }
-            }
-        }
-    }
-
-    private fun collectTodayUsage(): JSONArray {
-        val arr = JSONArray()
-        try {
-            val usageManager = getSystemService(Context.USAGE_STATS_SERVICE) as? UsageStatsManager ?: return arr
-            val cal = Calendar.getInstance().apply {
-                set(Calendar.HOUR_OF_DAY, 0)
-                set(Calendar.MINUTE, 0)
-                set(Calendar.SECOND, 0)
-                set(Calendar.MILLISECOND, 0)
-            }
-            val startOfDay = cal.timeInMillis
-            val endOfDay = System.currentTimeMillis()
-
-            val statsList = usageManager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startOfDay, endOfDay)
-            for (stat in statsList) {
-                val mins = (stat.totalTimeInForeground / 60000).toInt()
-                if (mins > 0) {
-                    arr.put(JSONObject().apply {
-                        put("package_name", stat.packageName.lowercase())
-                        put("minutes_used", mins)
-                    })
-                }
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        return arr
     }
 
     private fun stopVpn() {
@@ -528,23 +355,32 @@ class VyronVpnService : VpnService() {
         isServiceRunning = false
         try {
             unregisterReceiver(policyUpdateReceiver)
-        } catch (e: Exception) {
-            // Receiver might not be registered
+        } catch (_: Exception) {
         }
         try {
+            dnsExecutor?.shutdownNow()
+        } catch (_: Exception) {
+        }
+        dnsExecutor = null
+
+        try {
             localDnsServer?.stop()
-        } catch (e: Exception) {
-            e.printStackTrace()
+        } catch (_: Exception) {
         }
         localDnsServer = null
 
         try {
             vpnInterface?.close()
-        } catch (e: Exception) {
-            e.printStackTrace()
+        } catch (_: Exception) {
         }
         vpnInterface = null
-        stopForeground(true)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
         stopSelf()
     }
 
