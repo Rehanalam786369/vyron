@@ -41,6 +41,12 @@ class MainActivity : FlutterActivity() {
 
                 "syncPolicyToNative" -> {
                     val json = call.argument<String>("policyJson") ?: ""
+                    val serverUrl = call.argument<String>("serverUrl")
+                    val deviceToken = call.argument<String>("deviceToken")
+
+                    if (!serverUrl.isNullOrEmpty() && !deviceToken.isNullOrEmpty()) {
+                        policyStore.saveCredentials(serverUrl, deviceToken)
+                    }
                     policyStore.saveFullPolicyJson(json)
                     result.success(true)
                 }
@@ -111,6 +117,43 @@ class MainActivity : FlutterActivity() {
                 "getTodayUsageStats" -> {
                     val stats = getTodayUsageMap()
                     result.success(stats)
+                }
+
+                "testDnsResolution" -> {
+                    val domain = call.argument<String>("domain") ?: "instagram.com"
+                    kotlin.concurrent.thread {
+                        try {
+                            val addrs = java.net.InetAddress.getAllByName(domain)
+                            val ipList = addrs.map { it.hostAddress ?: "" }
+                            runOnUiThread {
+                                result.success(ipList)
+                            }
+                        } catch (e: Exception) {
+                            runOnUiThread {
+                                result.success(listOf("BLOCKED (Unresolved / ${e.message})"))
+                            }
+                        }
+                    }
+                }
+
+                "openPrivateDnsSettings" -> {
+                    try {
+                        val intent = Intent(Settings.ACTION_WIRELESS_SETTINGS).apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                        startActivity(intent)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        try {
+                            val intent = Intent(Settings.ACTION_SETTINGS).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e2: Exception) {
+                            result.error("SETTINGS_ERROR", e2.message, null)
+                        }
+                    }
                 }
 
                 else -> result.notImplemented()

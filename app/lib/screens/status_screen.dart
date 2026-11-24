@@ -16,6 +16,15 @@ class _StatusScreenState extends State<StatusScreen> {
   Map<String, int> _usage = {};
   bool _isLoading = false;
   bool _isProtectionRunning = false;
+  final _testDomainController = TextEditingController(text: 'instagram.com');
+  String? _dnsTestResult;
+  bool _isTestingDns = false;
+
+  @override
+  void dispose() {
+    _testDomainController.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -41,8 +50,10 @@ class _StatusScreenState extends State<StatusScreen> {
   Future<void> _fetchPolicyAndUsage() async {
     try {
       final pol = await ApiService.fetchPolicy();
+      final serverUrl = await ApiService.getServerUrl();
+      final token = await ApiService.getDeviceToken();
       final usageStats = await NativeBridge.getTodayUsageStats();
-      await NativeBridge.syncPolicyToNative(pol);
+      await NativeBridge.syncPolicyToNative(pol, serverUrl: serverUrl, deviceToken: token);
       setState(() {
         _policy = pol;
         _usage = usageStats;
@@ -197,10 +208,33 @@ class _StatusScreenState extends State<StatusScreen> {
     );
   }
 
+  Future<void> _testDns(String domain) async {
+    final clean = domain.trim().toLowerCase();
+    if (clean.isEmpty) return;
+    setState(() {
+      _isTestingDns = true;
+      _dnsTestResult = 'Resolving $clean...';
+    });
+    final ips = await NativeBridge.testDnsResolution(clean);
+    setState(() {
+      _isTestingDns = false;
+      if (ips.isEmpty) {
+        _dnsTestResult = 'BLOCKED (NXDOMAIN / No IP)';
+      } else if (ips.any((ip) => ip == '0.0.0.0' || ip.contains('BLOCKED'))) {
+        _dnsTestResult = '0.0.0.0 — BLOCKED by VYRON Shield';
+      } else {
+        _dnsTestResult = 'ALLOWED — ${ips.join(', ')}';
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final appPolicies = (_policy['app_policies'] as List<dynamic>?) ?? [];
     final activeWaivers = (_policy['active_waivers'] as List<dynamic>?) ?? [];
+    final netRules = (_policy['network_rules'] as Map<String, dynamic>?) ?? {};
+    final blockedDomains = (netRules['blocked_domains'] as List<dynamic>?) ?? [];
+    final blockedIps = (netRules['blocked_ips'] as List<dynamic>?) ?? [];
 
     return Scaffold(
       backgroundColor: const Color(0xFF070A12),
@@ -347,6 +381,198 @@ class _StatusScreenState extends State<StatusScreen> {
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 20),
+
+              // DNS Shield & Domain Blocking Status Card
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0F172A),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0x660284C7)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(Icons.dns, size: 18, color: Color(0xFF38BDF8)),
+                            SizedBox(width: 8),
+                            Text(
+                              'DNS DOMAIN SHIELD',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                                letterSpacing: 1,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: const Color(0x4D0369A1),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            '${blockedDomains.length} DOMAINS${blockedIps.isNotEmpty ? ', ${blockedIps.length} IPS' : ''} BLOCKED',
+                            style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF38BDF8),
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    if (blockedDomains.isEmpty)
+                      const Text(
+                        'No domains currently blocked. Add block rules in the VYRON Control Panel.',
+                        style: TextStyle(color: Color(0xFF64748B), fontSize: 12),
+                      )
+                    else
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: blockedDomains.map((d) {
+                          return Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: const Color(0x804C0519),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: const Color(0x80E11D48)),
+                            ),
+                            child: Text(
+                              d.toString(),
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Color(0xFFFB7185),
+                                fontFamily: 'monospace',
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    const SizedBox(height: 14),
+                    const Divider(color: Color(0xFF1E293B)),
+                    const SizedBox(height: 8),
+
+                    // Live DNS Test Tool
+                    const Text(
+                      'TEST DNS RESOLUTION (VERIFY ZERO-LEAK BLOCK):',
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)),
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _testDomainController,
+                            style: const TextStyle(color: Colors.white, fontSize: 13, fontFamily: 'monospace'),
+                            decoration: InputDecoration(
+                              hintText: 'e.g. instagram.com',
+                              hintStyle: const TextStyle(color: Color(0xFF475569)),
+                              filled: true,
+                              fillColor: const Color(0xFF070A12),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: const BorderSide(color: Color(0xFF334155)),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: const BorderSide(color: Color(0xFF334155)),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton(
+                          onPressed: _isTestingDns ? null : () => _testDns(_testDomainController.text),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF0284C7),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                          child: _isTestingDns
+                              ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                              : const Text('Test Block', style: TextStyle(color: Colors.white, fontSize: 12)),
+                        ),
+                      ],
+                    ),
+                    if (_dnsTestResult != null) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: _dnsTestResult!.contains('BLOCKED')
+                              ? const Color(0x4D065F46)
+                              : const Color(0x4D4C0519),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: _dnsTestResult!.contains('BLOCKED') ? const Color(0xFF059669) : const Color(0xFFE11D48),
+                          ),
+                        ),
+                        child: Text(
+                          _dnsTestResult!,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontFamily: 'monospace',
+                            fontWeight: FontWeight.bold,
+                            color: _dnsTestResult!.contains('BLOCKED') ? const Color(0xFF34D399) : const Color(0xFFFB7185),
+                          ),
+                        ),
+                      ),
+                    ],
+
+                    const SizedBox(height: 12),
+                    // Android Private DNS Notice & Shortcut
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0B1329),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFF1E293B)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Row(
+                            children: [
+                              Icon(Icons.info_outline, size: 14, color: Color(0xFFF59E0B)),
+                              SizedBox(width: 6),
+                              Text(
+                                'Android "Private DNS" Notice',
+                                style: TextStyle(color: Color(0xFFF59E0B), fontSize: 11, fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          const Text(
+                            'If Android OS Private DNS is active with a third-party DoT provider, Android bypasses local DNS filters. Set Private DNS to "Off" (or Automatic) for 100% enforcement.',
+                            style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                          ),
+                          const SizedBox(height: 6),
+                          InkWell(
+                            onTap: () => NativeBridge.openPrivateDnsSettings(),
+                            child: const Text(
+                              'Open Network / Private DNS Settings →',
+                              style: TextStyle(color: Color(0xFF38BDF8), fontSize: 11, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 24),
 

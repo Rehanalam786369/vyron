@@ -67,8 +67,9 @@ class _PairingScreenState extends State<PairingScreen> {
       setState(() {
         _statusText = 'Enabling zero-lag system governance...';
       });
+      final token = await ApiService.getDeviceToken();
       final policy = await ApiService.fetchPolicy();
-      await NativeBridge.syncPolicyToNative(policy);
+      await NativeBridge.syncPolicyToNative(policy, serverUrl: serverUrl, deviceToken: token);
 
       if (!mounted) return;
       _showSnackbar('Device paired successfully as ${pairData['device_name']}!');

@@ -16,10 +16,18 @@ class NativeBridge {
   }
 
   // Pass latest policy json to native Android PolicyStore
-  static Future<bool> syncPolicyToNative(Map<String, dynamic> policyMap) async {
+  static Future<bool> syncPolicyToNative(
+    Map<String, dynamic> policyMap, {
+    String? serverUrl,
+    String? deviceToken,
+  }) async {
     try {
       final String jsonStr = jsonEncode(policyMap);
-      final bool? success = await _channel.invokeMethod('syncPolicyToNative', {'policyJson': jsonStr});
+      final bool? success = await _channel.invokeMethod('syncPolicyToNative', {
+        'policyJson': jsonStr,
+        'serverUrl': serverUrl,
+        'deviceToken': deviceToken,
+      });
       return success ?? false;
     } on PlatformException {
       return false;
@@ -94,5 +102,23 @@ class NativeBridge {
     } on PlatformException {
       return {};
     }
+  }
+
+  // Test resolving a domain to verify DNS blocking
+  static Future<List<String>> testDnsResolution(String domain) async {
+    try {
+      final List<dynamic>? res = await _channel.invokeMethod('testDnsResolution', {'domain': domain});
+      if (res == null) return [];
+      return res.map((e) => e.toString()).toList();
+    } on PlatformException catch (e) {
+      return ['ERROR: ${e.message}'];
+    }
+  }
+
+  // Open device Network / Private DNS settings
+  static Future<void> openPrivateDnsSettings() async {
+    try {
+      await _channel.invokeMethod('openPrivateDnsSettings');
+    } catch (_) {}
   }
 }

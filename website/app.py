@@ -2131,5 +2131,11 @@ def device_upload_logs():
 
 
 if __name__ == "__main__":
+    try:
+        from dns_server import run_dns_server_background
+        run_dns_server_background()
+    except Exception as e:
+        logger.warning(f"Could not start background DNS server: {e}")
+
     port = int(os.getenv("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)

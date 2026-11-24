@@ -1,6 +1,7 @@
 package com.vyron.networkcontrol
 
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import org.json.JSONArray
 import org.json.JSONObject
@@ -22,7 +23,7 @@ data class ActiveWaiverItem(
     val expiresAtEpochMs: Long
 )
 
-class PolicyStore(context: Context) {
+class PolicyStore(private val context: Context) {
     private val prefs: SharedPreferences =
         context.applicationContext.getSharedPreferences("vyron_policy_store", Context.MODE_PRIVATE)
 
@@ -42,6 +43,13 @@ class PolicyStore(context: Context) {
         get() = prefs.getBoolean("uninstall_allowed", false)
         set(value) = prefs.edit().putBoolean("uninstall_allowed", value).apply()
 
+    fun saveCredentials(url: String, token: String) {
+        prefs.edit()
+            .putString("server_url", url)
+            .putString("device_token", token)
+            .apply()
+    }
+
     fun saveFullPolicyJson(jsonStr: String) {
         try {
             val root = JSONObject(jsonStr)
@@ -49,6 +57,12 @@ class PolicyStore(context: Context) {
             uninstallAllowed = root.optBoolean("uninstall_allowed", false)
 
             prefs.edit().putString("cached_policy_json", jsonStr).apply()
+
+            // Broadcast policy update so VpnService and AppGuard reload immediately
+            val intent = Intent("com.vyron.ACTION_POLICY_UPDATED").apply {
+                setPackage(context.packageName)
+            }
+            context.sendBroadcast(intent)
         } catch (e: Exception) {
             e.printStackTrace()
         }
